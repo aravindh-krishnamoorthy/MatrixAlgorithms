@@ -1,0 +1,4 @@
+name = "MatrixFunctions"
+uuid = "61a6108f-7e2f-4e7a-a110-ecb451d1d35b"
+authors = ["Aravindh Krishnamoorthy <aravindh.krishnamoorthy@fau.de>"]
+version = "0.1.0"
