@@ -1,7 +1,7 @@
 #
 # INDEX:
 #     1. fm_schur_parlett_recurrence(f::Function, X::AbstractMatrix)
-#
+#     2. fm_schur_parlett_block(f::Function, X::AbstractMatrix)
 
 #
 # Schur-Parlett algorithm based on Algorithm 4.13 in Matrix Functions, Higham.
@@ -62,4 +62,10 @@ function fm_schur_parlett_recurrence(f::Function, X::AbstractMatrix)
         end
     end
     return Z*F*Z'
+end
+
+#
+# Schur-Parlett block algorithm based on Algorithm 9.6 in Matrix Functions, Higham.
+#
+function fm_schur_parlett_block(f::Function, X::AbstractMatrix)
 end
