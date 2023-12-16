@@ -1,5 +1,7 @@
-module MatrixFunctions
+# This exception is thrown by functions that fail when the input matrix
+# contains repeated eigenvalues.
+struct RepeatedEigenvalueException <: Exception
+end
 
-greet() = print("Hello World!")
-
-end # module MatrixFunctions
+# Schur-Parett algorithms
+include("schur_parlett.jl")
