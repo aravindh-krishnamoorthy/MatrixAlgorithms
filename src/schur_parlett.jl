@@ -1,14 +1,25 @@
+################################################################################
+# This file is a part of the Julia package: MatrixFunctions.jl
+# Released under the MIT license, see LICENSE file for details.
+# Copyright (C) 2023 Aravindh Krishnamoorthy and contributors.
 #
-# INDEX:
-#     1. fm_schur_parlett_recurrence(f::Function, X::AbstractMatrix)
-#     2. fm_schur_parlett_block(f::Function, X::AbstractMatrix)
+# Functions in this file:
+#   1. fm_schur_parlett_recurrence(f::Function, X::AbstractMatrix)
+#   2. fm_schur_parlett_block(f::Function, X::AbstractMatrix)
+#
+# In all functions:
+# - Intermediate results are computed in the input element type unless
+#     conversion to complex type is needed.
+################################################################################
 
-#
-# Schur-Parlett algorithm based on Algorithm 4.13 in Matrix Functions, Higham.
+################################################################################
+# Schur-Parlett algorithm based on Algorithm 4.13 In
+#   Matrix Functions, Higham, 2008, SIAM, ISBN 978-0-89871-646-7.
 #
 # NOTE: This function implements a basic algorithm that is used internally as 
-#       a reference and for testing; it must not be used in production code.
-#
+#       a reference and for testing; this function must not be used in
+#       production code.
+################################################################################
 function fm_schur_parlett_recurrence(f::Function, X::AbstractMatrix)
     m,n = size(X)
     @assert m == n
@@ -64,8 +75,15 @@ function fm_schur_parlett_recurrence(f::Function, X::AbstractMatrix)
     return Z*F*Z'
 end
 
+################################################################################
 #
-# Schur-Parlett block algorithm based on Algorithm 9.6 in Matrix Functions, Higham.
+# Schur-Parlett block algorithm based on Algorithm 9.6 in
+#   Matrix Functions, Higham, 2008, SIAM, ISBN 978-0-89871-646-7.
 #
+# NOTE: This algorithm does not perform reordering and blocking in Steps 3--5
+#       (Algorithm 3.6 + confluent permutation search + reordering). Instead
+#       this algorithm assumes 'schur' to return an appropriately blocked T.
+#
+################################################################################
 function fm_schur_parlett_block(f::Function, X::AbstractMatrix)
 end
