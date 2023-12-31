@@ -1,13 +1,6 @@
-<<<<<<< HEAD
 # MatrixAlgorithms
 =======
 _Staging area for matrix algebra algorithms in **M**ATLAB, **J**ulia, **F**ortran, **R**ust, and **C**/C++_
-=======
-# MatrixFunctions.jl
-A Julia package for computing scalar and matrix-valued functions of matrix variables and their Fréchet derivatives<br>
-Released under the MIT license, see LICENSE file for details<br>
-Copyright (C) 2023 Aravindh Krishnamoorthy and contributors<br>
->>>>>>> 3adb246 (Updates to copyright info and package docs)
 
 <div align="center">
 
