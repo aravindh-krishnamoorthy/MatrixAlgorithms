@@ -25,6 +25,7 @@ function fm_schur_parlett_recurrence(f::Function, X::AbstractMatrix)
     @assert m == n
     @assert m > 0
 
+    # Schur decomposition
     S = schur(X)
     if !istriu(S.T)
         # T is only triangular in the complex field
@@ -36,7 +37,20 @@ function fm_schur_parlett_recurrence(f::Function, X::AbstractMatrix)
 
     # For diagonalisable matrices, use the straightforward formula
     if isdiag(T)
-        D = Diagonal(f.(λ))
+        # Move to complex field in case the current domain is insufficient
+        # to compute f.(λ)
+        λ′ = λ
+        try
+            λ′ = f.(λ)
+        catch e
+            if isa(e, DomainError)
+                λ = complex.(λ)
+                λ′ = f.(λ)
+            else
+                throw(e)
+            end
+        end
+        D = Diagonal(λ′)
         F = Z*D*Z'
         return F
     end
@@ -86,4 +100,48 @@ end
 #
 ################################################################################
 function fm_schur_parlett_block(f::Function, X::AbstractMatrix)
+    m,n = size(X)
+    @assert m == n
+    @assert m > 0
+
+    # Schur decomposition
+    T, Z, λ = schur(X)
+
+    # For diagonalisable matrices, use the straightforward formula
+    if isdiag(T)
+        # Move to complex field in case the current domain is insufficient
+        # to compute f.(λ)
+        λ′ = λ
+        try
+            λ′ = f.(λ)
+        catch e
+            if isa(e, DomainError)
+                λ = complex.(λ)
+                λ′ = f.(λ)
+            else
+                throw(e)
+            end
+        end
+        D = Diagonal(λ′)
+        F = Z*D*Z'
+        return F
+    end
+
+    # Assign diagonal elements to groups with blocking parameter δ = 0.1
+    δ = 0.1
+    S = ones(n,1)
+    C = zeros(n,1)
+    C[1] = 1
+    for i = 2:n
+        if norm(λ[i] - λ[i-1]) ≤ δ
+            S[i] = S[i-1]
+            C[S[i]] = C[S[i]] + 1
+            continue
+        else
+            S[i] = S[i-1] + 1
+            C[S[i]] = 1
+        end
+    end
+    C = cumsum(C)
+    mb = S[n]
 end
