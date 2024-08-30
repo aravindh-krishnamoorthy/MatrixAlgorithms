@@ -12,6 +12,8 @@
 #     conversion to complex type is needed.
 ################################################################################
 
+using LinearAlgebra
+
 ################################################################################
 # Schur-Parlett algorithm based on Algorithm 4.13 In
 #   Matrix Functions, Higham, 2008, SIAM, ISBN 978-0-89871-646-7.
