@@ -107,7 +107,8 @@ function fm_schur_parlett_block(f::Function, X::AbstractMatrix)
     @assert m > 0
 
     # Schur decomposition
-    T, Z, λ = schur(X)
+    S = schur(X)
+    T, Z, λ = S.T, S.Z, S.values
 
     # For diagonalisable matrices, use the straightforward formula
     if isdiag(T)
@@ -129,21 +130,37 @@ function fm_schur_parlett_block(f::Function, X::AbstractMatrix)
         return F
     end
 
+    if ~istriu(T)
+        # If T is quasi upper triangular, convert to complex-valued
+        # upper triangular as required by Algorithm 9.6
+        S = Schur{Complex}(S)
+        T, Z, λ = S.T, S.Z, S.values
+    end
+
     # Assign diagonal elements to groups with blocking parameter δ = 0.1
     δ = 0.1
-    S = ones(n,1)
-    C = zeros(n,1)
-    C[1] = 1
-    for i = 2:n
-        if norm(λ[i] - λ[i-1]) ≤ δ
-            S[i] = S[i-1]
-            C[S[i]] = C[S[i]] + 1
-            continue
-        else
-            S[i] = S[i-1] + 1
-            C[S[i]] = 1
+    q = zeros(Int,n)
+    lq = zeros(Int,n)
+    D = [abs(λ[i] - λ[j]) for i = 1:n, j = 1:n]
+    for i = 1:n
+        if q[i] == 0
+            q[i] = maximum(q) + 1
+            lq[q[i]] += 1
+        end
+        for j = i:n
+            if q[j] == 0
+                if D[i,j] < δ
+                    q[j] = q[i]
+                    lq[q[j]] += 1
+                end
+            end
         end
     end
-    C = cumsum(C)
-    mb = S[n]
+
+    #TODO: Reordering. Here, we assume that schur decomposition already
+    #TODO: reorders as per requirement.
+
+    display(q)
+    display(lq)
+
 end
