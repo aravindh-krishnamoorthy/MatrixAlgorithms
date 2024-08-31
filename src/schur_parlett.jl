@@ -13,6 +13,7 @@
 ################################################################################
 
 using LinearAlgebra
+using TaylorDiff
 
 ################################################################################
 # Schur-Parlett algorithm based on Algorithm 4.13 In
@@ -101,7 +102,7 @@ end
 #       this algorithm assumes 'schur' to return an appropriately blocked T.
 #
 ################################################################################
-function fm_schur_parlett_block(f::Function, X::AbstractMatrix)
+function fm_schur_parlett_block(f::Function, X::AbstractMatrix; MAXITER::Int = 100)
     m,n = size(X)
     @assert m == n
     @assert m > 0
@@ -137,21 +138,22 @@ function fm_schur_parlett_block(f::Function, X::AbstractMatrix)
         T, Z, λ = S.T, S.Z, S.values
     end
 
+    # Algorithm 9.5
     # Assign diagonal elements to groups with blocking parameter δ = 0.1
     δ = 0.1
     q = zeros(Int,n)
-    lq = zeros(Int,n)
+    ql = zeros(Int,n)
     D = [abs(λ[i] - λ[j]) for i = 1:n, j = 1:n]
     for i = 1:n
         if q[i] == 0
             q[i] = maximum(q) + 1
-            lq[q[i]] += 1
+            ql[q[i]] += 1
         end
         for j = i:n
             if q[j] == 0
                 if D[i,j] < δ
                     q[j] = q[i]
-                    lq[q[j]] += 1
+                    ql[q[j]] += 1
                 end
             end
         end
@@ -160,7 +162,43 @@ function fm_schur_parlett_block(f::Function, X::AbstractMatrix)
     #TODO: Reordering. Here, we assume that schur decomposition already
     #TODO: reorders as per requirement.
 
-    display(q)
-    display(lq)
+    display(ql)
+    
+    ix = 1
+    S = zeros(size(T))
+    for i=1:n
+        # Break if done
+        if ql[i] == 0 break end
+        
+        # Current m×m diagonal matrix
+        ixe = ix+ql[i]-1
+        Tii = T[ix:ixe,ix:ixe]
+        
+        # Algorithm 9.4
+        E = Matrix{eltype(Tii)}(I, ql[i], ql[i])
+        σ = sum(diag(Tii))/ql[i]
+        Mii = Tii - σ*E
+        tol = sqrt(eps())
+        y = maximum(abs.((E - abs.(triu(Tii,1)))\ones(ql[i])))
+        F0 = f(σ)*E
+        Pii = Mii
+        for s=1:MAXITER
+            display(f)
+            display(σ)
+            display(s)
+            F1 = F0  + TaylorDiff.derivative(f, σ, s)*P
+            P = P*M/(s+1)
+            if norm(F1 - F0) <= tol*norm(F1)
+                break
+            end
+            F0 = F1
+        end
+        S[ix:ixe,ix:ixe] = F1
 
+        # Next block
+        ix = ixe + 1
+    end
+
+    F = Z*S*Z'
+    return F
 end
