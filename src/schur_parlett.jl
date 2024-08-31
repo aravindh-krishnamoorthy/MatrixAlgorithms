@@ -13,7 +13,7 @@
 ################################################################################
 
 using LinearAlgebra
-using TaylorDiff
+using TaylorSeries
 
 ################################################################################
 # Schur-Parlett algorithm based on Algorithm 4.13 In
@@ -165,7 +165,7 @@ function fm_schur_parlett_block(f::Function, X::AbstractMatrix; MAXITER::Int = 1
     display(ql)
     
     ix = 1
-    S = zeros(size(T))
+    S = fill!(similar(T), 0)
     for i=1:n
         # Break if done
         if ql[i] == 0 break end
@@ -174,26 +174,33 @@ function fm_schur_parlett_block(f::Function, X::AbstractMatrix; MAXITER::Int = 1
         ixe = ix+ql[i]-1
         Tii = T[ix:ixe,ix:ixe]
         
-        # Algorithm 9.4
+        # Algorithm 9.4 for diagonal blocks
         E = Matrix{eltype(Tii)}(I, ql[i], ql[i])
         σ = sum(diag(Tii))/ql[i]
         Mii = Tii - σ*E
         tol = sqrt(eps())
-        y = maximum(abs.((E - abs.(triu(Tii,1)))\ones(ql[i])))
         F0 = f(σ)*E
+        F1 = F0
         Pii = Mii
+        ϵ = σ + Taylor1(MAXITER)
+        ft = f(ϵ)
         for s=1:MAXITER
-            display(f)
-            display(σ)
-            display(s)
-            F1 = F0  + TaylorDiff.derivative(f, σ, s)*P
-            P = P*M/(s+1)
+            F1 = F0  + ft[s]*Pii
+            Pii = Pii*Mii/(s+1)
+            #TODO: Improve exit condition based on Algorithm 9.4
             if norm(F1 - F0) <= tol*norm(F1)
                 break
             end
             F0 = F1
         end
         S[ix:ixe,ix:ixe] = F1
+
+        # Off-diagonal blocks
+        jx = j-ql[i]
+        for j = i-1:-1:1
+            jxe = jx-ql[j]+1
+            
+        end
 
         # Next block
         ix = ixe + 1
