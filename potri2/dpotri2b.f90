@@ -9,6 +9,7 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
 
     CHARACTER          UPLO
     INTEGER            INFO, LDA, N
+    DOUBLE PRECISION   TMP
     DOUBLE PRECISION   A( LDA, * )
 
     INTEGER            NB, IB, JB
@@ -16,42 +17,32 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
     PARAMETER          ( NB = 32 )
 
     IF (UPLO.EQ.'U') THEN
-        DO CONCURRENT (I = 1:N)
-            A(I,I) = 1/A(I,I)
-            A(I,I+1:N) = A(I,I+1:N)*A(I,I)
-            A(I+1:N,I) = 0
-            A(I,I) = A(I,I)*A(I,I)
-        END DO
-        DO J = N, 1, -1
-            DO CONCURRENT (I = 1:J)
-                A(J,I) = A(J,I) - DOT_PRODUCT(A(I,J+1:N), A(J+1:N,J))
+        DO J = 1, N
+            DO I = J+1, N
+                TMP    = A(I,J)
+                A(I,J) = A(J,I)
+                A(J,I) = TMP
             END DO
-            DO I = J-1, 1, -1
-                A(J,I) = A(J,I) - DOT_PRODUCT(A(I,I+1:J), A(J,I+1:J))
-            END DO
-        END DO
-        DO CONCURRENT (I = 1:N)
-            A(I,I+1:N) = A(I+1:N,I)
-        END DO
-    ELSE ! UPLO.EQ.'L'
-        DO CONCURRENT (J = 1:N)
-            A(J,J) = 1/A(J,J)
-            A(J+1:N,J) = A(J+1:N,J)*A(J,J)
-            A(J,J+1:N) = 0
-            A(J,J) = A(J,J)*A(J,J)
-        END DO
-        DO J = N, 1-NB, -NB
-            JB = MIN(J,NB)
-            CALL DPOTRI2BD(UPLO, N, A, LDA, INFO, J, JB)
-            DO I = J-JB, 1, -NB
-                IB = MIN(I,NB)
-                CALL DPOTRI2BO(UPLO, N, A, LDA, INFO, J, JB, I, IB)
-            END DO
-        END DO
-        DO CONCURRENT (I = 1:N)
-            A(I,1:I-1) = A(1:I-1,I)
         END DO
     END IF
+
+    DO CONCURRENT (J = 1:N)
+        A(J,J) = 1/A(J,J)
+        A(J+1:N,J) = A(J+1:N,J)*A(J,J)
+        A(J,J+1:N) = 0
+        A(J,J) = A(J,J)*A(J,J)
+    END DO
+    DO J = N, 1-NB, -NB
+        JB = MIN(J,NB)
+        CALL DPOTRI2BD(UPLO, N, A, LDA, INFO, J, JB)
+        DO I = J-JB, 1, -NB
+            IB = MIN(I,NB)
+            CALL DPOTRI2BO(UPLO, N, A, LDA, INFO, J, JB, I, IB)
+        END DO
+    END DO
+    DO CONCURRENT (I = 1:N)
+        A(I,1:I-1) = A(1:I-1,I)
+    END DO
     INFO = 0
     RETURN
 END
@@ -64,17 +55,14 @@ SUBROUTINE DPOTRI2BD(UPLO, N, A, LDA, INFO, J, JB)
     DOUBLE PRECISION   A( LDA, * )
     INTEGER            I, K
 
-    IF (UPLO.EQ.'U') THEN
-    ELSE
-        DO K = J, J-JB+1, -1
-            DO CONCURRENT (I = J-JB+1:K)
-                A(I,K) = A(I,K) - DOT_PRODUCT(A(K+1:N,I), A(K,K+1:N))
-            END DO
-            DO I = K-1, J-JB+1, -1
-                A(I,K) = A(I,K) - DOT_PRODUCT(A(I+1:K,I), A(I+1:K,K))
-            END DO
+    DO K = J, J-JB+1, -1
+        DO CONCURRENT (I = J-JB+1:K)
+            A(I,K) = A(I,K) - DOT_PRODUCT(A(K+1:N,I), A(K,K+1:N))
         END DO
-    END IF
+        DO I = K-1, J-JB+1, -1
+            A(I,K) = A(I,K) - DOT_PRODUCT(A(I+1:K,I), A(I+1:K,K))
+        END DO
+    END DO
     INFO = 0
     RETURN
 END SUBROUTINE
@@ -87,17 +75,14 @@ SUBROUTINE DPOTRI2BO(UPLO, N, A, LDA, INFO, J, JB, I, IB)
     DOUBLE PRECISION   A( LDA, * )
     INTEGER            K, L
 
-    IF (UPLO.EQ.'U') THEN
-    ELSE
+    DO CONCURRENT (K = J-JB+1:J)
+        A(I-IB+1:I,K) = A(I-IB+1:I,K) - MATMUL(A(K,K+1:N), A(K+1:N,I-IB+1:I))
+    END DO
+    DO L = I, I-IB+1, -1
         DO CONCURRENT (K = J-JB+1:J)
-            A(I-IB+1:I,K) = A(I-IB+1:I,K) - MATMUL(A(K,K+1:N), A(K+1:N,I-IB+1:I))
+            A(L,K) = A(L,K) - DOT_PRODUCT(A(L+1:K,L), A(L+1:K,K))
         END DO
-        DO L = I, I-IB+1, -1
-            DO CONCURRENT (K = J-JB+1:J)
-                A(L,K) = A(L,K) - DOT_PRODUCT(A(L+1:K,L), A(L+1:K,K))
-            END DO
-        END DO
-    END IF
+    END DO
     INFO = 0
     RETURN
 END SUBROUTINE
