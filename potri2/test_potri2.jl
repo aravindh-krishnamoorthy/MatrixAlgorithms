@@ -66,5 +66,5 @@ end
 println("| N | MKL/U (ns) | MKL/L (ns) | Fortran/U (ns) | Fortran/L (ns) |")
 println("| :--- | :--- | :--- | :--- | :--- |")
 for i = 1:length(MS)
-    Printf.@printf("| %d | %.2g | %.2g | %.2g | %.2g |\n", MS[i], MKLU[i], MKLL[i], FU[i], FL[i])
+    Printf.@printf("| %d | %.2g | %.2g | %.2g (%.2g) | %.2g (%.2g) |\n", MS[i], MKLU[i], MKLL[i], FU[i], FU[i]/MKLU[i], FL[i], FL[i]/MKLL[i])
 end
