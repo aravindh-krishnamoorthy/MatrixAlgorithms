@@ -17,9 +17,9 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
     PARAMETER          ( NB = 32 )
 
     IF (UPLO.EQ.'U') THEN
-        DO J = 1, N
-            DO I = J+1, N
-                TMP    = A(I,J)
+        DO CONCURRENT (J = 1:N)
+            DO CONCURRENT (I=J+1:N)
+                TMP = A(I,J)
                 A(I,J) = A(J,I)
                 A(J,I) = TMP
             END DO
