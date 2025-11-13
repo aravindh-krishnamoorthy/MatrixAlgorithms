@@ -14,7 +14,7 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
 
     INTEGER            NB, IB, JB
     INTEGER            I, J
-    PARAMETER          ( NB = 32 )
+    PARAMETER          ( NB = 128 )
 
     IF (UPLO.EQ.'U') THEN
         DO CONCURRENT (J = 1:N)
@@ -45,7 +45,7 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
     END DO
     INFO = 0
     RETURN
-END
+END SUBROUTINE DPOTRI2B
 
 SUBROUTINE DPOTRI2BD(UPLO, N, A, LDA, INFO, J, JB)
     IMPLICIT           NONE
@@ -53,19 +53,32 @@ SUBROUTINE DPOTRI2BD(UPLO, N, A, LDA, INFO, J, JB)
     CHARACTER          UPLO
     INTEGER            INFO, LDA, N, J, JB
     DOUBLE PRECISION   A( LDA, * )
-    INTEGER            I, K
+
+    INTEGER            I, K, LEN
+    DOUBLE PRECISION   DDOT
+    EXTERNAL           DDOT
 
     DO K = J, J-JB+1, -1
-        DO CONCURRENT (I = J-JB+1:K)
-            A(I,K) = A(I,K) - DOT_PRODUCT(A(K+1:N,I), A(K,K+1:N))
+
+        DO I = J-JB+1, K
+            LEN = N - K
+            IF (LEN > 0) THEN
+                A(I,K) = A(I,K) - DDOT(LEN, A(K+1,I), 1, A(K,K+1), LDA)
+            END IF
         END DO
+
         DO I = K-1, J-JB+1, -1
-            A(I,K) = A(I,K) - DOT_PRODUCT(A(I+1:K,I), A(I+1:K,K))
+            LEN = K - I
+            IF (LEN > 0) THEN
+                A(I,K) = A(I,K) - DDOT(LEN, A(I+1,I), 1, A(I+1,K), 1)
+            END IF
         END DO
+
     END DO
+
     INFO = 0
     RETURN
-END SUBROUTINE
+END SUBROUTINE DPOTRI2BD
 
 SUBROUTINE DPOTRI2BO(UPLO, N, A, LDA, INFO, J, JB, I, IB)
     IMPLICIT           NONE
@@ -73,16 +86,27 @@ SUBROUTINE DPOTRI2BO(UPLO, N, A, LDA, INFO, J, JB, I, IB)
     CHARACTER          UPLO
     INTEGER            INFO, LDA, N, I, IB, J, JB
     DOUBLE PRECISION   A( LDA, * )
-    INTEGER            K, L
 
-    DO CONCURRENT (K = J-JB+1:J)
-        A(I-IB+1:I,K) = A(I-IB+1:I,K) - MATMUL(A(K,K+1:N), A(K+1:N,I-IB+1:I))
+    INTEGER            K, L, LEN
+    DOUBLE PRECISION   DDOT
+    EXTERNAL           DDOT, DGEMV
+
+    DO K = J-JB+1, J
+        IF (K < N) THEN
+            CALL DGEMV('T', N-K, IB, -1.0D0, A(K+1, I-IB+1), LDA, &
+                       A(K, K+1), LDA, 1.0D0, A(I-IB+1, K), 1)
+        END IF
     END DO
+
     DO L = I, I-IB+1, -1
-        DO CONCURRENT (K = J-JB+1:J)
-            A(L,K) = A(L,K) - DOT_PRODUCT(A(L+1:K,L), A(L+1:K,K))
+        DO K = J-JB+1, J
+            LEN = K - L
+            IF (LEN > 0) THEN
+                A(L,K) = A(L,K) - DDOT(LEN, A(L+1,L), 1, A(L+1,K), 1)
+            END IF
         END DO
     END DO
+
     INFO = 0
     RETURN
-END SUBROUTINE
+END SUBROUTINE DPOTRI2BO
