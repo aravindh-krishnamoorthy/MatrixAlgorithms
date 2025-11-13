@@ -11,7 +11,9 @@ using Printf
 # using Plots
 # unicodeplots()
 
-MS = [2, 4, 8, 16, 32, 64, 128, 256]
+include("../src/MatrixAlgorithms.jl")
+
+MS = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
 FU = zeros(length(MS))
 FL = zeros(length(MS))
 MKLU = zeros(length(MS))

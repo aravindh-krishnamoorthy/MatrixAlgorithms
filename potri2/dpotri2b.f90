@@ -10,11 +10,13 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
     CHARACTER          UPLO
     INTEGER            INFO, LDA, N
     DOUBLE PRECISION   TMP
-    DOUBLE PRECISION   A( LDA, * )
+    DOUBLE PRECISION   A(LDA, *)
 
     INTEGER            NB, IB, JB
     INTEGER            I, J
-    PARAMETER          ( NB = 128 )
+    INTEGER            I1, I2, J1, J2
+
+    PARAMETER          (NB = 32)
 
     IF (UPLO.EQ.'U') THEN
         DO CONCURRENT (J = 1:N)
@@ -26,26 +28,30 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
         END DO
     END IF
 
-    DO CONCURRENT (J = 1:N)
-        A(J,J) = 1/A(J,J)
-        A(J+1:N,J) = A(J+1:N,J)*A(J,J)
-        A(J,J+1:N) = 0
-        A(J,J) = A(J,J)*A(J,J)
+    DO J = 1, N
+        TMP = 1.0D0 / A(J,J)
+        A(J+1:N, J) = A(J+1:N, J) * TMP
+        A(J, J) = TMP * TMP
+        A(J, J+1:N) = 0.0D0
     END DO
-    DO J = N, 1-NB, -NB
-        JB = MIN(J,NB)
+
+    DO J = N, 1, -NB
+        JB = MIN(J, NB)
         CALL DPOTRI2BD(UPLO, N, A, LDA, INFO, J, JB)
-        DO I = J-JB, 1, -NB
-            IB = MIN(I,NB)
+        DO I = J - JB, 1, -NB
+            IB = MIN(I, NB)
             CALL DPOTRI2BO(UPLO, N, A, LDA, INFO, J, JB, I, IB)
         END DO
     END DO
+
     DO CONCURRENT (I = 1:N)
         A(I,1:I-1) = A(1:I-1,I)
     END DO
+
     INFO = 0
     RETURN
 END SUBROUTINE DPOTRI2B
+
 
 SUBROUTINE DPOTRI2BD(UPLO, N, A, LDA, INFO, J, JB)
     IMPLICIT           NONE
@@ -54,31 +60,26 @@ SUBROUTINE DPOTRI2BD(UPLO, N, A, LDA, INFO, J, JB)
     INTEGER            INFO, LDA, N, J, JB
     DOUBLE PRECISION   A( LDA, * )
 
-    INTEGER            I, K, LEN
+    INTEGER            I, K, LEN, NCOL
     DOUBLE PRECISION   DDOT
-    EXTERNAL           DDOT
+    EXTERNAL           DDOT, DGEMV
 
     DO K = J, J-JB+1, -1
-
-        DO I = J-JB+1, K
-            LEN = N - K
-            IF (LEN > 0) THEN
-                A(I,K) = A(I,K) - DDOT(LEN, A(K+1,I), 1, A(K,K+1), LDA)
-            END IF
-        END DO
-
+        IF (K < N) THEN
+            LEN  = N - K
+            NCOL = K - (J - JB + 1) + 1
+            CALL DGEMV('T', LEN, NCOL, -1.0D0, A(K+1, J-JB+1), LDA, A(K, K+1), LDA, 1.0D0, A(J-JB+1, K), 1)
+        END IF
         DO I = K-1, J-JB+1, -1
-            LEN = K - I
-            IF (LEN > 0) THEN
-                A(I,K) = A(I,K) - DDOT(LEN, A(I+1,I), 1, A(I+1,K), 1)
-            END IF
+            LEN     = K - I
+            A(I,K) = A(I,K) - DDOT(LEN, A(I+1,I), 1, A(I+1,K), 1)
         END DO
-
     END DO
 
     INFO = 0
     RETURN
 END SUBROUTINE DPOTRI2BD
+
 
 SUBROUTINE DPOTRI2BO(UPLO, N, A, LDA, INFO, J, JB, I, IB)
     IMPLICIT           NONE
@@ -93,17 +94,13 @@ SUBROUTINE DPOTRI2BO(UPLO, N, A, LDA, INFO, J, JB, I, IB)
 
     DO K = J-JB+1, J
         IF (K < N) THEN
-            CALL DGEMV('T', N-K, IB, -1.0D0, A(K+1, I-IB+1), LDA, &
-                       A(K, K+1), LDA, 1.0D0, A(I-IB+1, K), 1)
+            CALL DGEMV('T', N-K, IB, -1.0D0, A(K+1, I-IB+1), LDA, A(K, K+1), LDA, 1.0D0, A(I-IB+1, K), 1)
         END IF
     END DO
-
-    DO L = I, I-IB+1, -1
-        DO K = J-JB+1, J
-            LEN = K - L
-            IF (LEN > 0) THEN
-                A(L,K) = A(L,K) - DDOT(LEN, A(L+1,L), 1, A(L+1,K), 1)
-            END IF
+    DO K = J-JB+1, J
+        DO L = MIN(K-1, I), I-IB+1, -1
+            LEN     = K - L
+            A(L,K) = A(L,K) - DDOT(LEN, A(L+1,L), 1, A(L+1,K), 1)
         END DO
     END DO
 
