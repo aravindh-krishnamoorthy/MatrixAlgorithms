@@ -70,10 +70,6 @@ SUBROUTINE DPOTRI2BD(UPLO, N, A, LDA, INFO, J, JB)
             NCOL = K - (J - JB + 1) + 1
             CALL DGEMV('T', LEN, NCOL, -1.0D0, A(K+1, J-JB+1), LDA, A(K, K+1), LDA, 1.0D0, A(J-JB+1, K), 1)
         END IF
-        ! DO I = K-1, J-JB+1, -1
-        !     LEN     = K - I
-        !     A(I,K) = A(I,K) - DDOT(LEN, A(I+1,I), 1, A(I+1,K), 1)
-        ! END DO
         LEN = K - (J-JB+1) + 1
         CALL DTRSV('L', 'T', 'U', LEN, A(J-JB+1, J-JB+1), LDA, A(J-JB+1, K), 1)
     END DO
