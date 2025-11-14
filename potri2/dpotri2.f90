@@ -5,24 +5,24 @@
 !###############################################################################
 
 SUBROUTINE DPOTRI2(UPLO, N, A, LDA, INFO)
-    IMPLICIT           NONE
+   IMPLICIT NONE
 
-    CHARACTER          UPLO
-    INTEGER            INFO, LDA, N
-    DOUBLE PRECISION   A( LDA, * )
+   CHARACTER UPLO
+   INTEGER INFO, LDA, N
+   DOUBLE PRECISION A(LDA, *)
 
-    EXTERNAL           DPOTRI2S, DPOTRI2B
+   EXTERNAL DPOTRI2S, DPOTRI2B
 
-    INTEGER            NB
-    PARAMETER          ( NB = 32 )
+   INTEGER NB
+   PARAMETER(NB=32)
 
-    IF (NB.LE.1 .OR. NB.GE.N) THEN
-        ! Scalar version
-        CALL DPOTRI2S(UPLO, N, A, LDA, INFO)
-    ELSE
-        ! Block version
-        CALL DPOTRI2B(UPLO, N, A, LDA, INFO)
-    END IF
-    INFO = 0
-    RETURN
+   IF (NB .LE. 1 .OR. NB .GE. N) THEN
+      ! Scalar version
+      CALL DPOTRI2S(UPLO, N, A, LDA, INFO)
+   ELSE
+      ! Block version
+      CALL DPOTRI2B(UPLO, N, A, LDA, INFO)
+   END IF
+   INFO = 0
+   RETURN
 END
