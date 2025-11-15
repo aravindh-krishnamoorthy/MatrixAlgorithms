@@ -61,7 +61,7 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
    IF (BEG .EQ. 0) BEG = NB
    DO I = N - NB, 1, -NB
       ! Each K index can be run in parallel
-!$omp parallel do default(shared) private(K,II,JJ,IB,JB,INFO_LOCAL) schedule(static)
+!$omp parallel do default(shared) private(K,II,JJ,IB,JB,INFO) schedule(static)
       DO K = BEG, I, NB
          II = I - (K - BEG)
          IB = MIN(II, NB)
