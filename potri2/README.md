@@ -4,7 +4,7 @@ An efficient version of LAPACK's `potri` using the algorithm in "Matrix Inversio
 **Note:** This function is only partially implemented.
 
 - For $N < 32,$ the scalar version in `dpotri2s.f90` is used, which is partially optimized.
-- For $N \geq 32,$ the block version in `dpotri2b.f90` is used, which, while being nearly optimized, is not yet parallelized.
+- For $N \geq 32,$ the block version in `dpotri2b.f90` is used, which, while being nearly optimized. For parallelization, see PR https://github.com/aravindh-krishnamoorthy/MatrixAlgorithms/pull/1
 - Only the IEEE double precision version is currently being implemented. Once complete, the single precision and complex-valued variants will be implemented.
 
 ## IEEE double precision
