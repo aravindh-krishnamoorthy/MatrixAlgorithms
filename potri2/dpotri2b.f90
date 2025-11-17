@@ -42,7 +42,7 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
    IB = 0
    DO J = N, 1, -NB
       ! Each K index can be run in parallel
-      !$omp parallel do default(shared) private(K,II,JJ,IB,JB,INFO) schedule(static)
+      !disable !$omp parallel do default(shared) private(K,II,JJ,IB,JB,INFO) schedule(static)
       DO K = N, J, -NB
          II = K
          IB = MIN(II, NB)
@@ -54,13 +54,13 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
             CALL DPOTRI2BO(UPLO, N, A, LDA, INFO, II, IB, JJ, JB)
          END IF
       END DO
-      !$omp end parallel do
+      !disable !$omp end parallel do
    END DO
    BEG = N - NB*((N-1)/NB)
    IF (BEG .EQ. 0) BEG = NB
    DO I = N - NB, 1, -NB
       ! Each K index can be run in parallel
-      !$omp parallel do default(shared) private(K,II,JJ,IB,JB,INFO) schedule(static)
+      !disable !$omp parallel do default(shared) private(K,II,JJ,IB,JB,INFO) schedule(static)
       DO K = BEG, I, NB
          II = I - (K - BEG)
          IB = MIN(II, NB)
@@ -72,7 +72,7 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
             CALL DPOTRI2BO(UPLO, N, A, LDA, INFO, II, IB, JJ, JB)
          END IF
       END DO
-      !$omp end parallel do
+      !disable !$omp end parallel do
    END DO
 
    DO CONCURRENT(I=1:N)
