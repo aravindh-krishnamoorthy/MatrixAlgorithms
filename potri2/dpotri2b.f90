@@ -12,8 +12,8 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
    DOUBLE PRECISION TMP
    DOUBLE PRECISION A(LDA, *)
 
-   INTEGER NB, IB, JB
-   INTEGER I, J
+   INTEGER NB, IB, JB, BEG
+   INTEGER I, J, K, II, JJ
    INTEGER I1, I2, J1, J2
 
    IF (N.LT.256) THEN
@@ -38,13 +38,41 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
       END DO
    END IF
 
+   ! Anti-diagonal blocks can be run in parallel
+   IB = 0
    DO J = N, 1, -NB
-      JB = MIN(J, NB)
-      CALL DPOTRI2BD(UPLO, N, A, LDA, INFO, J, JB)
-      DO I = J - JB, 1, -NB
-         IB = MIN(I, NB)
-         CALL DPOTRI2BO(UPLO, N, A, LDA, INFO, J, JB, I, IB)
+      ! Each K index can be run in parallel
+      !disable !$omp parallel do default(shared) private(K,II,JJ,IB,JB,INFO) schedule(static)
+      DO K = N, J, -NB
+         II = K
+         IB = MIN(II, NB)
+         JJ = J + (N - K)
+         JB = MIN(JJ, NB)
+         IF (II .EQ. JJ) THEN
+            CALL DPOTRI2BD(UPLO, N, A, LDA, INFO, II, IB)
+         ELSE IF (II .GT. JJ) THEN
+            CALL DPOTRI2BO(UPLO, N, A, LDA, INFO, II, IB, JJ, JB)
+         END IF
       END DO
+      !disable !$omp end parallel do
+   END DO
+   BEG = N - NB*((N-1)/NB)
+   IF (BEG .EQ. 0) BEG = NB
+   DO I = N - NB, 1, -NB
+      ! Each K index can be run in parallel
+      !disable !$omp parallel do default(shared) private(K,II,JJ,IB,JB,INFO) schedule(static)
+      DO K = BEG, I, NB
+         II = I - (K - BEG)
+         IB = MIN(II, NB)
+         JJ = K
+         JB = MIN(JJ, NB)
+         IF (II .EQ. JJ) THEN
+            CALL DPOTRI2BD(UPLO, N, A, LDA, INFO, II, IB)
+         ELSE IF (II .GT. JJ) THEN
+            CALL DPOTRI2BO(UPLO, N, A, LDA, INFO, II, IB, JJ, JB)
+         END IF
+      END DO
+      !disable !$omp end parallel do
    END DO
 
    DO CONCURRENT(I=1:N)
