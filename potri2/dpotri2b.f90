@@ -23,21 +23,20 @@ SUBROUTINE DPOTRI2B(UPLO, N, A, LDA, INFO)
    END IF
 
    IF (UPLO .EQ. 'U') THEN
-      DO CONCURRENT(J=1:N)
-         DO CONCURRENT(I=J + 1:N)
-            TMP = A(I, J)
-            A(I, J) = A(J, I)
-            A(J, I) = TMP
-         END DO
+      DO J = 1, N
+         TMP = 1.0D0/A(J, J)
+         A(J + 1:N, J) = A(J, J + 1:N)*TMP
+         A(J, J) = TMP*TMP
+         A(J, J + 1:N) = 0.0D0
+      END DO
+   ELSE
+      DO J = 1, N
+         TMP = 1.0D0/A(J, J)
+         A(J + 1:N, J) = A(J + 1:N, J)*TMP
+         A(J, J) = TMP*TMP
+         A(J, J + 1:N) = 0.0D0
       END DO
    END IF
-
-   DO J = 1, N
-      TMP = 1.0D0/A(J, J)
-      A(J + 1:N, J) = A(J + 1:N, J)*TMP
-      A(J, J) = TMP*TMP
-      A(J, J + 1:N) = 0.0D0
-   END DO
 
    DO J = N, 1, -NB
       JB = MIN(J, NB)
