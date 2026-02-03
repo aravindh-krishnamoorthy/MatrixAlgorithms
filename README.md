@@ -8,7 +8,7 @@ _Staging area for matrix algebra algorithms in **M**ATLAB, **J**ulia, **F**ortra
   |---|---|---|---|---|
   | [potri2](https://github.com/aravindh-krishnamoorthy/MatrixAlgorithms/tree/main/potri2) | J-F | Efficient implementation of LAPACK's `potri` function | LAPACK | Partial |
   | [trsr](https://github.com/aravindh-krishnamoorthy/MatrixAlgorithms/tree/main/trsr) | J-F | Efficient square root of matrices |  | Partial |
-
+  | [matrixfunctions](https://github.com/aravindh-krishnamoorthy/MatrixAlgorithms/tree/main/matrixfunctions) | J | Functions of matrices |  | Partial |
   
 </div>
 
