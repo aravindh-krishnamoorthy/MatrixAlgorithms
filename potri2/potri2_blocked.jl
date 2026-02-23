@@ -17,8 +17,8 @@ function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
     z = zero(T)
     d = zeros(T, n)
 
-    # Workspace for GEMM-based update of the J×J block (only used for the kk∈K term)
     Tbuf = Matrix{T}(undef, bs, bs)
+    Pbuf = Matrix{T}(undef, n, bs)
 
     @inbounds if uplo == 'U'
         for j = 1:n
@@ -32,12 +32,12 @@ function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
 
         @views for je = n:-bs:1
             jb = max(1, je-bs+1)
-            J = jb:je
+            J  = jb:je
             mJ = length(J)
 
             for ke = n:-bs:(je+1)
                 kb = max(je+1, ke-bs+1)
-                K = kb:ke
+                K  = kb:ke
 
                 Irect = 1:jb-1
                 if !isempty(Irect)
@@ -66,23 +66,26 @@ function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
             end
 
             for j = je:-1:jb
-                for k = je:-1:j+1
-                    xkj = X[k,j]
+                if j < je
+                    Kb = (j+1):je
+                    y  = view(Pbuf, 1:j, 1)
+                    mul!(y, view(X, 1:j, Kb), view(X, Kb, j), one(T), zero(T))
                     for i = 1:j
-                        X[j,i] = X[j,i] - X[i,k]*xkj
+                        X[j,i] -= y[i]
                     end
                 end
+
                 for k = j:-1:1
-                    tmp = X[j,k]*d[k]
+                    tmp = X[j,k] * d[k]
                     X[j,k] = conj(tmp)
                     for i = 1:k-1
-                        X[j,i] = X[j,i] - X[i,k]*tmp
+                        X[j,i] = X[j,i] - X[i,k] * tmp
                     end
                 end
             end
         end
 
-        @inbounds for i=1:n, j=i+1:n
+        @inbounds for i = 1:n, j = i+1:n
             X[i,j] = X[j,i]'
         end
         return X
@@ -99,12 +102,12 @@ function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
 
         @views for je = n:-bs:1
             jb = max(1, je-bs+1)
-            J = jb:je
+            J  = jb:je
             mJ = length(J)
 
             for ke = n:-bs:(je+1)
                 kb = max(je+1, ke-bs+1)
-                K = kb:ke
+                K  = kb:ke
 
                 Irect = 1:jb-1
                 if !isempty(Irect)
@@ -133,23 +136,34 @@ function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
             end
 
             for j = je:-1:jb
-                for k = je:-1:j+1
-                    xjk = X[j,k]
+                if j < je
+                    Kb = (j+1):je
+                    m  = length(Kb)
+
+                    v = view(Pbuf, 1:m, 1)
+                    for t = 1:m
+                        v[t] = X[j, first(Kb) + t - 1]
+                    end
+
+                    y = view(Pbuf, 1:j, 2)
+                    mul!(y, transpose(view(X, Kb, 1:j)), v, one(T), zero(T))
+
                     for i = 1:j
-                        X[i,j] = X[i,j] - X[k,i]*xjk
+                        X[i,j] -= y[i]
                     end
                 end
+
                 for k = j:-1:1
-                    tmp = X[k,j]*d[k]
+                    tmp = X[k,j] * d[k]
                     X[k,j] = conj(tmp)
                     for i = 1:k-1
-                        X[i,j] = X[i,j] - X[k,i]*tmp
+                        X[i,j] = X[i,j] - X[k,i] * tmp
                     end
                 end
             end
         end
 
-        @inbounds for i=1:n, j=1:i-1
+        @inbounds for i = 1:n, j = 1:i-1
             X[i,j] = X[j,i]'
         end
         return X
