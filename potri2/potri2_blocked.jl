@@ -37,10 +37,10 @@ function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
 
                 Irect = 1:jb-1
                 if !isempty(Irect)
-                    C  = view(X, J, Irect)          # p x q  (X[j,i])
-                    BK = view(X, K, J)              # r x p  (X[k,j])
-                    AI = view(X, Irect, K)          # q x r  (X[i,k])
-                    mul!(C, transpose(BK), transpose(AI), -one(T), one(T))  # (p x r)*(r x q)
+                    C  = view(X, J, Irect)
+                    BK = view(X, K, J)
+                    AI = view(X, Irect, K)
+                    mul!(C, transpose(BK), transpose(AI), -one(T), one(T))
                 end
 
                 for jj in J
@@ -96,9 +96,9 @@ function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
 
                 Irect = 1:jb-1
                 if !isempty(Irect)
-                    C = view(X, Irect, J)          # q x p  (X[i,j])
-                    A = view(X, K, Irect)          # r x q  (X[k,i])
-                    B = view(X, J, K)              # p x r  (X[j,k])
+                    C = view(X, Irect, J)
+                    A = view(X, K, Irect)
+                    B = view(X, J, K)
                     mul!(C, transpose(A), transpose(B), -one(T), one(T))
                 end
 
