@@ -17,6 +17,9 @@ function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
     z = zero(T)
     d = zeros(T, n)
 
+    # Workspace for GEMM-based update of the J×J block (only used for the kk∈K term)
+    Tbuf = Matrix{T}(undef, bs, bs)
+
     @inbounds if uplo == 'U'
         for j = 1:n
             Xjj = inv(X[j,j])
@@ -30,6 +33,7 @@ function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
         @views for je = n:-bs:1
             jb = max(1, je-bs+1)
             J = jb:je
+            mJ = length(J)
 
             for ke = n:-bs:(je+1)
                 kb = max(je+1, ke-bs+1)
@@ -43,13 +47,20 @@ function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
                     mul!(C, transpose(BK), transpose(AI), -one(T), one(T))
                 end
 
-                for jj in J
-                    for ii = jb:jj
-                        s = z
-                        @simd for kk in K
-                            s += X[ii,kk] * X[kk,jj]
+                if !isempty(K)
+                    TJ = view(Tbuf, 1:mJ, 1:mJ)
+                    fill!(TJ, z)
+
+                    A = view(X, J, K)
+                    B = view(X, K, J)
+                    mul!(TJ, A, B, one(T), zero(T))
+
+                    for jj_loc = 1:mJ
+                        jj = jb + jj_loc - 1
+                        for ii_loc = 1:jj_loc
+                            ii = jb + ii_loc - 1
+                            X[jj, ii] -= TJ[ii_loc, jj_loc]
                         end
-                        X[jj,ii] -= s
                     end
                 end
             end
@@ -89,6 +100,7 @@ function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
         @views for je = n:-bs:1
             jb = max(1, je-bs+1)
             J = jb:je
+            mJ = length(J)
 
             for ke = n:-bs:(je+1)
                 kb = max(je+1, ke-bs+1)
@@ -102,13 +114,20 @@ function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
                     mul!(C, transpose(A), transpose(B), -one(T), one(T))
                 end
 
-                for jj in J
-                    for ii = jb:jj
-                        s = z
-                        @simd for kk in K
-                            s += X[kk,ii] * X[jj,kk]
+                if !isempty(K)
+                    TJ = view(Tbuf, 1:mJ, 1:mJ)
+                    fill!(TJ, z)
+
+                    A = view(X, K, J)
+                    B = view(X, J, K)
+                    mul!(TJ, transpose(A), transpose(B), one(T), zero(T))
+
+                    for jj_loc = 1:mJ
+                        jj = jb + jj_loc - 1
+                        for ii_loc = 1:jj_loc
+                            ii = jb + ii_loc - 1
+                            X[ii, jj] -= TJ[ii_loc, jj_loc]
                         end
-                        X[ii,jj] -= s
                     end
                 end
             end
