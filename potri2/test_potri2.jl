@@ -4,7 +4,6 @@
 # Copyright (C) 2023 Aravindh Krishnamoorthy and contributors.
 ################################################################################
 
-using MKL
 using LinearAlgebra
 using BenchmarkTools
 using Printf
@@ -12,7 +11,7 @@ using Printf
 # unicodeplots()
 
 include("../src/MatrixAlgorithms.jl")
-MKL.set_num_threads(1)
+# BLAS.set_num_threads(1)
 
 if length(ARGS) > 0
     MS = let expr = Meta.parse(ARGS[1])
@@ -22,6 +21,12 @@ if length(ARGS) > 0
 else
     MS = [2, 4, 8, 16, 32, 64, 100, 128, 256, 500, 512, 1024]
 end
+
+# Real arithmetic
+RU = zeros(length(MS))
+RL = zeros(length(MS))
+PU = zeros(length(MS))
+PL = zeros(length(MS))
 FU = zeros(length(MS))
 FL = zeros(length(MS))
 MKLU = zeros(length(MS))
@@ -44,37 +49,87 @@ for i in 1:length(MS)
     display(norm(triu(X1) - X0))
     X1 = MatrixAlgorithms.potri2_parallel!('L', copy(L))
     display(norm(triu(X1) - X0))
-    X1 = MatrixAlgorithms.potri2_freference!('U', copy(U))
+    X1 = MatrixAlgorithms.potri2_blocked!('U', copy(U))
     display(norm(triu(X1) - X0))
-    X1 = MatrixAlgorithms.potri2_freference!('L', copy(L))
-    display(norm(triu(X1) - X0))
-    X1 = MatrixAlgorithms.dpotri2!('U', copy(U))
-    display(norm(triu(X1) - X0))
-    X1 = MatrixAlgorithms.dpotri2!('L', copy(L))
+    X1 = MatrixAlgorithms.potri2_blocked!('L', copy(L))
     display(norm(triu(X1) - X0))
     # Timing
     b = @benchmark LAPACK.potri!('U', copy($U)) ;
     MKLU[i] = mean(b).time
     b = @benchmark LAPACK.potri!('L', copy($L)) ;
     MKLL[i] = mean(b).time
-    # b = @benchmark MatrixAlgorithms.potri2!('U', copy($U)) ;
-    # JU[i] = mean(b).time
-    # b = @benchmark MatrixAlgorithms.potri2!('L', copy($L)) ;
-    # JL[i] = mean(b).time
-    b = @benchmark MatrixAlgorithms.dpotri2!('U', copy($U); rl=false) ;
+    b = @benchmark MatrixAlgorithms.potri2!('U', copy($U)) ;
+    RU[i] = mean(b).time
+    b = @benchmark MatrixAlgorithms.potri2!('L', copy($L)) ;
+    RL[i] = mean(b).time
+    b = @benchmark MatrixAlgorithms.potri2_parallel!('U', copy($U)) ;
+    PU[i] = mean(b).time
+    b = @benchmark MatrixAlgorithms.potri2_parallel!('L', copy($L)) ;
+    PL[i] = mean(b).time
+    b = @benchmark MatrixAlgorithms.potri2_blocked!('U', copy($U)) ;
     FU[i] = mean(b).time
-    b = @benchmark MatrixAlgorithms.dpotri2!('L', copy($L); rl=false) ;
+    b = @benchmark MatrixAlgorithms.potri2_blocked!('L', copy($L)) ;
     FL[i] = mean(b).time
 end
 
-# plt = scatter(MS, MKLU, m=:square, label="MKLU")
-# plt = scatter!(plt, MS, MKLL, m=:square, label="MKLL")
-# plt = scatter!(plt, MS, FU, m=:cross, label="FU")
-# plt = scatter!(plt, MS, FL, m=:cross, label="FL")
-# plt = plot!(plt, title="MKL potri vs potri2 in Julia", xlabel="n", ylabel="Time (ns)", xscale=:log2, yscale=:log10, grid=true)
-
-println("| N | MKL/U (ns) | MKL/L (ns) | Fortran/U (ns) | Fortran/L (ns) |")
+println("| N | REF/U (ns) | REF/L (ns) | JREF/U (ns) | JREF/L (ns) | PAR/U (ns) | PAR/L (ns) | BLO/U (ns) | BLO/L (ns) |")
 println("| :--- | :--- | :--- | :--- | :--- |")
 for i = 1:length(MS)
-    Printf.@printf("| %d | %.2g | %.2g | %.2g (%.2g) | %.2g (%.2g) |\n", MS[i], MKLU[i], MKLL[i], FU[i], FU[i]/MKLU[i], FL[i], FL[i]/MKLL[i])
+    Printf.@printf("| %d | %.2g | %.2g | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) |\n", MS[i], MKLU[i], MKLL[i], RU[i], RU[i]/MKLU[i], PU[i], PU[i]/MKLU[i], FU[i], FU[i]/MKLU[i], RL[i], RL[i]/MKLL[i], PL[i], PL[i]/MKLL[i], FL[i], FL[i]/MKLL[i])
+end
+
+# Complex arithmetic
+RU = zeros(length(MS))
+RL = zeros(length(MS))
+PU = zeros(length(MS))
+PL = zeros(length(MS))
+FU = zeros(length(MS))
+FL = zeros(length(MS))
+MKLU = zeros(length(MS))
+MKLL = zeros(length(MS))
+for i in 1:length(MS)
+    N = MS[i] 
+    println("N=$N...")
+
+    # Real
+    X = complex.(rand(N, N), rand(N, N))
+    X = X*X'
+    U = Matrix(cholesky(X).U)
+    L = Matrix(cholesky(X).L)
+    X0 = LAPACK.potri!('U', copy(U))
+    X1 = MatrixAlgorithms.potri2!('U', copy(U))
+    display(norm(triu(X1) - X0))
+    X1 = MatrixAlgorithms.potri2!('L', copy(L))
+    display(norm(triu(X1) - X0))
+    X1 = MatrixAlgorithms.potri2_parallel!('U', copy(U))
+    display(norm(triu(X1) - X0))
+    X1 = MatrixAlgorithms.potri2_parallel!('L', copy(L))
+    display(norm(triu(X1) - X0))
+    X1 = MatrixAlgorithms.potri2_blocked!('U', copy(U))
+    display(norm(triu(X1) - X0))
+    X1 = MatrixAlgorithms.potri2_blocked!('L', copy(L))
+    display(norm(triu(X1) - X0))
+    # Timing
+    b = @benchmark LAPACK.potri!('U', copy($U)) ;
+    MKLU[i] = mean(b).time
+    b = @benchmark LAPACK.potri!('L', copy($L)) ;
+    MKLL[i] = mean(b).time
+    b = @benchmark MatrixAlgorithms.potri2!('U', copy($U)) ;
+    RU[i] = mean(b).time
+    b = @benchmark MatrixAlgorithms.potri2!('L', copy($L)) ;
+    RL[i] = mean(b).time
+    b = @benchmark MatrixAlgorithms.potri2_parallel!('U', copy($U)) ;
+    PU[i] = mean(b).time
+    b = @benchmark MatrixAlgorithms.potri2_parallel!('L', copy($L)) ;
+    PL[i] = mean(b).time
+    b = @benchmark MatrixAlgorithms.potri2_blocked!('U', copy($U)) ;
+    FU[i] = mean(b).time
+    b = @benchmark MatrixAlgorithms.potri2_blocked!('L', copy($L)) ;
+    FL[i] = mean(b).time
+end
+
+println("| N | REF/U (ns) | REF/L (ns) | JREF/U (ns) | JREF/L (ns) | PAR/U (ns) | PAR/L (ns) | BLO/U (ns) | BLO/L (ns) |")
+println("| :--- | :--- | :--- | :--- | :--- |")
+for i = 1:length(MS)
+    Printf.@printf("| %d | %.2g | %.2g | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) |\n", MS[i], MKLU[i], MKLL[i], RU[i], RU[i]/MKLU[i], PU[i], PU[i]/MKLU[i], FU[i], FU[i]/MKLU[i], RL[i], RL[i]/MKLL[i], PL[i], PL[i]/MKLL[i], FL[i], FL[i]/MKLL[i])
 end
