@@ -12,94 +12,127 @@
 ################################################################################
 # Blocked version
 ################################################################################
-function _invtri_unblocked_lower!(A::AbstractMatrix{T}) where {T}
-    n = size(A,1)
-    dinv = similar(A, n)
-    @inbounds for i=1:n
-        dinv[i] = inv(A[i,i])
-        A[i,i] = dinv[i]
-    end
-    @inbounds for j=1:n
-        for i=j+1:n
-            s = zero(T)
-            @simd for k=j:i-1
-                s += A[i,k]*A[k,j]
-            end
-            A[i,j] = -dinv[i]*s
-        end
-    end
-    A
-end
-
-function _invtri_unblocked_upper!(A::AbstractMatrix{T}) where {T}
-    n = size(A,1)
-    dinv = similar(A, n)
-    @inbounds for i=1:n
-        dinv[i] = inv(A[i,i])
-        A[i,i] = dinv[i]
-    end
-    @inbounds for j=n:-1:1
-        for i=j-1:-1:1
-            s = zero(T)
-            @simd for k=i+1:j
-                s += A[i,k]*A[k,j]
-            end
-            A[i,j] = -dinv[i]*s
-        end
-    end
-    A
-end
-
-function _invtri_rec_lower!(A::AbstractMatrix{T}, bs::Int) where {T}
-    n = size(A,1)
-    n <= bs && return _invtri_unblocked_lower!(A)
-    n1 = n >>> 1
-    n2 = n - n1
-    A11 = @view A[1:n1, 1:n1]
-    A21 = @view A[n1+1:n, 1:n1]
-    A22 = @view A[n1+1:n, n1+1:n]
-    _invtri_rec_lower!(A22, bs)
-    _invtri_rec_lower!(A11, bs)
-    T1 = similar(A21)
-    mul!(T1, A21, A11)
-    mul!(A21, A22, T1)
-    @inbounds @simd for idx in eachindex(A21)
-        A21[idx] = -A21[idx]
-    end
-    A
-end
-
-function _invtri_rec_upper!(A::AbstractMatrix{T}, bs::Int) where {T}
-    n = size(A,1)
-    n <= bs && return _invtri_unblocked_upper!(A)
-    n1 = n >>> 1
-    n2 = n - n1
-    A11 = @view A[1:n1, 1:n1]
-    A12 = @view A[1:n1, n1+1:n]
-    A22 = @view A[n1+1:n, n1+1:n]
-    _invtri_rec_upper!(A11, bs)
-    _invtri_rec_upper!(A22, bs)
-    T1 = similar(A12)
-    mul!(T1, A11, A12)
-    mul!(A12, T1, A22)
-    @inbounds @simd for idx in eachindex(A12)
-        A12[idx] = -A12[idx]
-    end
-    A
-end
-
 function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
     n = size(X,1)
-    if uplo == 'L'
-        _invtri_rec_lower!(X, bs)
-        Y = similar(X)
-        mul!(Y, adjoint(X), X)
-        copyto!(X, Y)
+    z = zero(T)
+    d = zeros(T, n)
+
+    @inbounds if uplo == 'U'
+        for j = 1:n
+            Xjj = inv(X[j,j])
+            X[j,j] = Xjj
+            d[j] = Xjj
+            for i = j+1:n
+                X[i,j] = z
+            end
+        end
+
+        @views for je = n:-bs:1
+            jb = max(1, je-bs+1)
+            J = jb:je
+
+            for ke = n:-bs:(je+1)
+                kb = max(je+1, ke-bs+1)
+                K = kb:ke
+
+                Irect = 1:jb-1
+                if !isempty(Irect)
+                    C  = view(X, J, Irect)          # p x q  (X[j,i])
+                    BK = view(X, K, J)              # r x p  (X[k,j])
+                    AI = view(X, Irect, K)          # q x r  (X[i,k])
+                    mul!(C, transpose(BK), transpose(AI), -one(T), one(T))  # (p x r)*(r x q)
+                end
+
+                for jj in J
+                    for ii = jb:jj
+                        s = z
+                        @simd for kk in K
+                            s += X[ii,kk] * X[kk,jj]
+                        end
+                        X[jj,ii] -= s
+                    end
+                end
+            end
+
+            for j = je:-1:jb
+                for k = je:-1:j+1
+                    xkj = X[k,j]
+                    for i = 1:j
+                        X[j,i] = X[j,i] - X[i,k]*xkj
+                    end
+                end
+                for k = j:-1:1
+                    tmp = X[j,k]*d[k]
+                    X[j,k] = conj(tmp)
+                    for i = 1:k-1
+                        X[j,i] = X[j,i] - X[i,k]*tmp
+                    end
+                end
+            end
+        end
+
+        @inbounds for i=1:n, j=i+1:n
+            X[i,j] = X[j,i]'
+        end
+        return X
+
     else
-        _invtri_rec_upper!(X, bs)
-        Y = similar(X)
-        mul!(Y, X, adjoint(X))
-        copyto!(X, Y)
+        for j = 1:n
+            Xjj = inv(X[j,j])
+            X[j,j] = Xjj
+            d[j] = Xjj
+            for i = 1:j-1
+                X[i,j] = z
+            end
+        end
+
+        @views for je = n:-bs:1
+            jb = max(1, je-bs+1)
+            J = jb:je
+
+            for ke = n:-bs:(je+1)
+                kb = max(je+1, ke-bs+1)
+                K = kb:ke
+
+                Irect = 1:jb-1
+                if !isempty(Irect)
+                    C = view(X, Irect, J)          # q x p  (X[i,j])
+                    A = view(X, K, Irect)          # r x q  (X[k,i])
+                    B = view(X, J, K)              # p x r  (X[j,k])
+                    mul!(C, transpose(A), transpose(B), -one(T), one(T))
+                end
+
+                for jj in J
+                    for ii = jb:jj
+                        s = z
+                        @simd for kk in K
+                            s += X[kk,ii] * X[jj,kk]
+                        end
+                        X[ii,jj] -= s
+                    end
+                end
+            end
+
+            for j = je:-1:jb
+                for k = je:-1:j+1
+                    xjk = X[j,k]
+                    for i = 1:j
+                        X[i,j] = X[i,j] - X[k,i]*xjk
+                    end
+                end
+                for k = j:-1:1
+                    tmp = X[k,j]*d[k]
+                    X[k,j] = conj(tmp)
+                    for i = 1:k-1
+                        X[i,j] = X[i,j] - X[k,i]*tmp
+                    end
+                end
+            end
+        end
+
+        @inbounds for i=1:n, j=1:i-1
+            X[i,j] = X[j,i]'
+        end
+        return X
     end
-    X
 end
