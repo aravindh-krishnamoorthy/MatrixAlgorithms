@@ -7,7 +7,7 @@ An efficient version of LAPACK's `potri` using the algorithm in "Matrix Inversio
 
 Linux (x86_64-linux-gnu) on 8×11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz with OpenBLAS
 
-Commit: 
+Commit: https://github.com/aravindh-krishnamoorthy/MatrixAlgorithms/tree/336c8c722ca235c188b5c8dae9d80d5b7138b36a/potri2
 
 | N | REF/U (ns) | JREF/U (ns) | BLO/U (ns) | REF/L (ns) | JREF/L (ns) | BLO/L (ns)
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
