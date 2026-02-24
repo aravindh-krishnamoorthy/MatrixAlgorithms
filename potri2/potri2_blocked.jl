@@ -12,160 +12,44 @@
 ################################################################################
 # Blocked version
 ################################################################################
-function potri2_blocked!(uplo::Char, X::AbstractMatrix{T}; bs::Int=64) where {T}
-    n = size(X,1)
-    z = zero(T)
-    d = zeros(T, n)
+const BLAS = LinearAlgebra.BLAS
+function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:LinearAlgebra.BlasFloat}
+    n = size(X, 1)
+    @assert size(X, 2) == n
 
-    Tbuf = Matrix{T}(undef, bs, bs)
-    Pbuf = Matrix{T}(undef, n, bs)
-
-    @inbounds if uplo == 'U'
-        for j = 1:n
-            Xjj = inv(X[j,j])
-            X[j,j] = Xjj
-            d[j] = Xjj
-            for i = j+1:n
-                X[i,j] = z
-            end
-        end
-
-        @views for je = n:-bs:1
-            jb = max(1, je-bs+1)
-            J  = jb:je
-            mJ = length(J)
-
-            for ke = n:-bs:(je+1)
-                kb = max(je+1, ke-bs+1)
-                K  = kb:ke
-
-                Irect = 1:jb-1
-                if !isempty(Irect)
-                    C  = view(X, J, Irect)
-                    BK = view(X, K, J)
-                    AI = view(X, Irect, K)
-                    mul!(C, transpose(BK), transpose(AI), -one(T), one(T))
-                end
-
-                if !isempty(K)
-                    TJ = view(Tbuf, 1:mJ, 1:mJ)
-                    fill!(TJ, z)
-
-                    A = view(X, J, K)
-                    B = view(X, K, J)
-                    mul!(TJ, A, B, one(T), zero(T))
-
-                    for jj_loc = 1:mJ
-                        jj = jb + jj_loc - 1
-                        for ii_loc = 1:jj_loc
-                            ii = jb + ii_loc - 1
-                            X[jj, ii] -= TJ[ii_loc, jj_loc]
-                        end
-                    end
-                end
-            end
-
-            for j = je:-1:jb
-                if j < je
-                    Kb = (j+1):je
-                    y  = view(Pbuf, 1:j, 1)
-                    mul!(y, view(X, 1:j, Kb), view(X, Kb, j), one(T), zero(T))
-                    for i = 1:j
-                        X[j,i] -= y[i]
-                    end
-                end
-
-                for k = j:-1:1
-                    tmp = X[j,k] * d[k]
-                    X[j,k] = conj(tmp)
-                    for i = 1:k-1
-                        X[j,i] = X[j,i] - X[i,k] * tmp
-                    end
-                end
-            end
-        end
-
-        @inbounds for i = 1:n, j = i+1:n
-            X[i,j] = X[j,i]'
-        end
-        return X
-
-    else
-        for j = 1:n
-            Xjj = inv(X[j,j])
-            X[j,j] = Xjj
-            d[j] = Xjj
-            for i = 1:j-1
-                X[i,j] = z
-            end
-        end
-
-        @views for je = n:-bs:1
-            jb = max(1, je-bs+1)
-            J  = jb:je
-            mJ = length(J)
-
-            for ke = n:-bs:(je+1)
-                kb = max(je+1, ke-bs+1)
-                K  = kb:ke
-
-                Irect = 1:jb-1
-                if !isempty(Irect)
-                    C = view(X, Irect, J)
-                    A = view(X, K, Irect)
-                    B = view(X, J, K)
-                    mul!(C, transpose(A), transpose(B), -one(T), one(T))
-                end
-
-                if !isempty(K)
-                    TJ = view(Tbuf, 1:mJ, 1:mJ)
-                    fill!(TJ, z)
-
-                    A = view(X, K, J)
-                    B = view(X, J, K)
-                    mul!(TJ, transpose(A), transpose(B), one(T), zero(T))
-
-                    for jj_loc = 1:mJ
-                        jj = jb + jj_loc - 1
-                        for ii_loc = 1:jj_loc
-                            ii = jb + ii_loc - 1
-                            X[ii, jj] -= TJ[ii_loc, jj_loc]
-                        end
-                    end
-                end
-            end
-
-            for j = je:-1:jb
-                if j < je
-                    Kb = (j+1):je
-                    m  = length(Kb)
-
-                    v = view(Pbuf, 1:m, 1)
-                    for t = 1:m
-                        v[t] = X[j, first(Kb) + t - 1]
-                    end
-
-                    y = view(Pbuf, 1:j, 2)
-                    mul!(y, transpose(view(X, Kb, 1:j)), v, one(T), zero(T))
-
-                    for i = 1:j
-                        X[i,j] -= y[i]
-                    end
-                end
-
-                for k = j:-1:1
-                    tmp = X[k,j] * d[k]
-                    X[k,j] = conj(tmp)
-                    for i = 1:k-1
-                        X[i,j] = X[i,j] - X[k,i] * tmp
-                    end
-                end
-            end
-        end
-
-        @inbounds for i = 1:n, j = 1:i-1
-            X[i,j] = X[j,i]'
-        end
-        return X
+    @inbounds for i = 1:n
+        X[i, :] = X[i, i]*X[i, :]
     end
+
+    b   = zeros(T, n)
+    rhs = similar(b)
+
+    @views for j = n:-1:1
+        x = view(rhs, 1:j)
+        copyto!(x, view(b, 1:j))
+        x[1:j] = -x[1:j]
+        x[j] += one(T)
+
+        A = view(X, 1:j, 1:j)
+        BLAS.trsv!('U', 'N', 'N', A, x)
+
+        copyto!(view(X, j, 1:j), conj(x))
+
+        if j > 1
+            A2 = view(X, 1:j-1, j:n)
+            v  = view(X, j:n, j-1)
+            y  = view(b, 1:j-1)
+            V  = reshape(v, :, 1)
+            Y  = reshape(y, :, 1)
+            BLAS.gemm!('N', 'N', one(T), A2, V, zero(T), Y)
+        end
+    end
+
+    @inbounds for i = 1:n
+        for j = i+1:n
+            X[i, j] = conj(X[j, i])
+        end
+    end
+
+    return X
 end
