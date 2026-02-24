@@ -39,10 +39,12 @@ for i in 1:length(MS)
     U = Matrix(cholesky(X).U)
     L = Matrix(cholesky(X).L)
     X0 = LAPACK.potri!('U', copy(U))
-    X1 = MatrixAlgorithms.potri2!('U', copy(U))
-    display(norm(triu(X1) - X0))
-    X1 = MatrixAlgorithms.potri2!('L', copy(L))
-    display(norm(triu(X1) - X0))
+    if N <= 256
+        X1 = MatrixAlgorithms.potri2!('U', copy(U))
+        display(norm(triu(X1) - X0))
+        X1 = MatrixAlgorithms.potri2!('L', copy(L))
+        display(norm(triu(X1) - X0))
+    end
     X1 = MatrixAlgorithms.potri2_blocked!('U', copy(U))
     display(norm(triu(X1) - X0))
     X1 = MatrixAlgorithms.potri2_blocked!('L', copy(L))
@@ -52,10 +54,12 @@ for i in 1:length(MS)
     MKLU[i] = mean(b).time
     b = @benchmark LAPACK.potri!('L', copy($L)) ;
     MKLL[i] = mean(b).time
-    b = @benchmark MatrixAlgorithms.potri2!('U', copy($U)) ;
-    RU[i] = mean(b).time
-    b = @benchmark MatrixAlgorithms.potri2!('L', copy($L)) ;
-    RL[i] = mean(b).time
+    if N <= 256
+        b = @benchmark MatrixAlgorithms.potri2!('U', copy($U)) ;
+        RU[i] = mean(b).time
+        b = @benchmark MatrixAlgorithms.potri2!('L', copy($L)) ;
+        RL[i] = mean(b).time
+    end
     b = @benchmark MatrixAlgorithms.potri2_blocked!('U', copy($U)) ;
     FU[i] = mean(b).time
     b = @benchmark MatrixAlgorithms.potri2_blocked!('L', copy($L)) ;
@@ -85,10 +89,12 @@ for i in 1:length(MS)
     U = Matrix(cholesky(X).U)
     L = Matrix(cholesky(X).L)
     X0 = LAPACK.potri!('U', copy(U))
-    X1 = MatrixAlgorithms.potri2!('U', copy(U))
-    display(norm(triu(X1) - X0))
-    X1 = MatrixAlgorithms.potri2!('L', copy(L))
-    display(norm(triu(X1) - X0))
+    if N <= 256
+        X1 = MatrixAlgorithms.potri2!('U', copy(U))
+        display(norm(triu(X1) - X0))
+        X1 = MatrixAlgorithms.potri2!('L', copy(L))
+        display(norm(triu(X1) - X0))
+    end
     X1 = MatrixAlgorithms.potri2_blocked!('U', copy(U))
     display(norm(triu(X1) - X0))
     X1 = MatrixAlgorithms.potri2_blocked!('L', copy(L))
@@ -98,10 +104,12 @@ for i in 1:length(MS)
     MKLU[i] = mean(b).time
     b = @benchmark LAPACK.potri!('L', copy($L)) ;
     MKLL[i] = mean(b).time
-    b = @benchmark MatrixAlgorithms.potri2!('U', copy($U)) ;
-    RU[i] = mean(b).time
-    b = @benchmark MatrixAlgorithms.potri2!('L', copy($L)) ;
-    RL[i] = mean(b).time
+    if N <= 256
+        b = @benchmark MatrixAlgorithms.potri2!('U', copy($U)) ;
+        RU[i] = mean(b).time
+        b = @benchmark MatrixAlgorithms.potri2!('L', copy($L)) ;
+        RL[i] = mean(b).time
+    end
     b = @benchmark MatrixAlgorithms.potri2_blocked!('U', copy($U)) ;
     FU[i] = mean(b).time
     b = @benchmark MatrixAlgorithms.potri2_blocked!('L', copy($L)) ;
