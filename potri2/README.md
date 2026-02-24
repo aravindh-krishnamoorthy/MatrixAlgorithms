@@ -40,5 +40,3 @@ Commit: https://github.com/aravindh-krishnamoorthy/MatrixAlgorithms/tree/336c8c7
 | 500 | 5.3e+06 | 5.6e+07 (11) | 8.6e+06 (1.6) | 5.5e+06 | 6.7e+07 (12) | 8.9e+06 (1.6) |
 | 512 | 5.8e+06 | 1.8e+08 (31) | 9.4e+06 (1.6) | 5.6e+06 | 1e+08 (18) | 9.1e+06 (1.6) |
 | 1024 | 4.1e+07 | 2e+09 (48) | 5.9e+07 (1.4) | 4.1e+07 | 1.7e+09 (42) | 6e+07 (1.4) |
-
-- [*] Not numerically accurate yet.
