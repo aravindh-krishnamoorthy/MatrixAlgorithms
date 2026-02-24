@@ -18,10 +18,19 @@ function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:
     @assert size(X, 2) == n
     @assert bs > 0
 
-    @inbounds for i = 1:n
-        di = X[i, i]
-        for k = i:n
-            X[i, k] = di * X[i, k]
+    if uplo == 'U'
+        @inbounds for i = 1:n
+            di = X[i, i]
+            for k = i:n
+                X[i, k] = di * X[i, k]
+            end
+        end
+    else
+        @inbounds for i = 1:n
+            di = X[i, i]
+            for k = i:n
+                X[i, k] = di * X[k, i]
+            end
         end
     end
 
