@@ -72,10 +72,10 @@ for i in 1:length(MS)
     FL[i] = mean(b).time
 end
 
-println("| N | REF/U (ns) | REF/L (ns) | JREF/U (ns) | JREF/L (ns) | PAR/U (ns) | PAR/L (ns) | BLO/U (ns) | BLO/L (ns) |")
+println("| N | REF/U (ns) | JREF/U (ns) | PAR/U (ns) | BLO/U (ns) | REF/L (ns) | JREF/L (ns) | PAR/L (ns) | BLO/L (ns)")
 println("| :--- | :--- | :--- | :--- | :--- |")
 for i = 1:length(MS)
-    Printf.@printf("| %d | %.2g | %.2g | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) |\n", MS[i], MKLU[i], MKLL[i], RU[i], RU[i]/MKLU[i], PU[i], PU[i]/MKLU[i], FU[i], FU[i]/MKLU[i], RL[i], RL[i]/MKLL[i], PL[i], PL[i]/MKLL[i], FL[i], FL[i]/MKLL[i])
+    Printf.@printf("| %d | %.2g | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) |\n", MS[i], MKLU[i], RU[i], RU[i]/MKLU[i], PU[i], PU[i]/MKLU[i], FU[i], FU[i]/MKLU[i], MKLL[i], RL[i], RL[i]/MKLL[i], PL[i], PL[i]/MKLL[i], FL[i], FL[i]/MKLL[i])
 end
 
 # Complex arithmetic
@@ -128,8 +128,8 @@ for i in 1:length(MS)
     FL[i] = mean(b).time
 end
 
-println("| N | REF/U (ns) | REF/L (ns) | JREF/U (ns) | JREF/L (ns) | PAR/U (ns) | PAR/L (ns) | BLO/U (ns) | BLO/L (ns) |")
+println("| N | REF/U (ns) | JREF/U (ns) | PAR/U (ns) | BLO/U (ns) | REF/L (ns) | JREF/L (ns) | PAR/L (ns) | BLO/L (ns)")
 println("| :--- | :--- | :--- | :--- | :--- |")
 for i = 1:length(MS)
-    Printf.@printf("| %d | %.2g | %.2g | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) |\n", MS[i], MKLU[i], MKLL[i], RU[i], RU[i]/MKLU[i], PU[i], PU[i]/MKLU[i], FU[i], FU[i]/MKLU[i], RL[i], RL[i]/MKLL[i], PL[i], PL[i]/MKLL[i], FL[i], FL[i]/MKLL[i])
+    Printf.@printf("| %d | %.2g | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) | %.2g | %.2g (%.2g) | %.2g (%.2g) | %.2g (%.2g) |\n", MS[i], MKLU[i], RU[i], RU[i]/MKLU[i], PU[i], PU[i]/MKLU[i], FU[i], FU[i]/MKLU[i], MKLL[i], RL[i], RL[i]/MKLL[i], PL[i], PL[i]/MKLL[i], FL[i], FL[i]/MKLL[i])
 end
