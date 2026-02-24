@@ -29,7 +29,7 @@ function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:
         @inbounds for i = 1:n
             di = X[i, i]
             for k = i:n
-                X[i, k] = di * X[k, i]
+                X[i, k] = di * conj(X[k, i])
             end
         end
     end
