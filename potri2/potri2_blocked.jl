@@ -57,13 +57,7 @@ function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:
             @views X[jr1:jr1+nb-1, 1:j0] .= B[1:j0, 1:nb]'
         end
     end
-
-    @inbounds for i = 1:n
-        for j = i+1:n
-            X[i, j] = conj(X[j, i])
-        end
-    end
-
+    X .= Hermitian(X, :L)
     return X
 end
 
