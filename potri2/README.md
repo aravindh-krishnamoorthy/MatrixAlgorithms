@@ -5,7 +5,7 @@ An efficient version of LAPACK's `potri` using the algorithm in "Matrix Inversio
 
 ## IEEE double precision (real arithmetic)
 
-Linux (x86_64-linux-gnu) on 8×11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz with OpenBLAS
+Linux (x86_64-linux-gnu) on Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz with OpenBLAS
 
 Commit: https://github.com/aravindh-krishnamoorthy/MatrixAlgorithms/tree/336c8c722ca235c188b5c8dae9d80d5b7138b36a/potri2
 
