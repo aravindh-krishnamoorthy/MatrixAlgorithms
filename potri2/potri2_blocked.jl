@@ -34,8 +34,6 @@ function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:
         end
     end
 
-    Tb_full = Matrix{T}(undef, bs, bs)
-    Rtmp    = Matrix{T}(undef, bs, bs)
     Bblk    = Matrix{T}(undef, n, bs)
     bvec    = Vector{T}(undef, bs)
     rhs     = Vector{T}(undef, bs)
@@ -46,53 +44,17 @@ function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:
         jr  = jr1:j
         j0  = j - nb
 
-        Tb = view(Tb_full, 1:nb, 1:nb)
-
         if j < n
-            A = view(X, jr, j+1:n)
-            C = view(X, j+1:n, jr)
-            BLAS.gemm!('N', 'N', one(T), A, C, zero(T), Tb)
+            BLAS.gemm!('N', 'N', one(T), view(X, 1:j, j+1:n), view(X, j+1:n, jr), zero(T), view(Bblk, 1:j, :))
         else
-            fill!(Tb, zero(T))
+            fill!(Bblk, zero(T))
         end
-
-        copyto!(view(Rtmp, 1:nb, 1:nb), view(X, jr, jr))
-        _potri2_inner!(view(Rtmp, 1:nb, 1:nb), Tb, view(bvec, 1:nb), view(rhs, 1:nb))
-        copyto!(Tb, view(Rtmp, 1:nb, 1:nb))
-
-        @inbounds for ii = 1:nb
-            r = jr1 + ii - 1
-            for jj = 1:ii
-                c = jr1 + jj - 1
-                X[r, c] = Tb[ii, jj]
-            end
-        end
-
+        _potri2_inner!(view(X, jr, jr), view(Bblk, jr, :), view(bvec, 1:nb), view(rhs, 1:nb))
         if j0 > 0
             B = view(Bblk, 1:j0, 1:nb)
-
-            A1 = view(X, 1:j0, jr)
-            BLAS.gemm!('N', 'N', one(T), A1, Tb, zero(T), B)
-
-            if j < n
-                A2 = view(X, 1:j0, j+1:n)
-                C2 = view(X, j+1:n, jr)
-                BLAS.gemm!('N', 'N', one(T), A2, C2, one(T), B)
-            end
-
-            @inbounds for col = 1:nb, row = 1:j0
-                B[row, col] = -B[row, col]
-            end
-
-            U = view(X, 1:j0, 1:j0)
-            BLAS.trsm!('L', 'U', 'N', 'N', one(T), U, B)
-
-            @inbounds for col = 1:nb
-                rrow = jr1 + col - 1
-                for row = 1:j0
-                    X[rrow, row] = conj(B[row, col])
-                end
-            end
+            BLAS.gemm!('N', 'N', one(T), view(X, 1:j0, jr), view(X, jr, jr), one(T), B)
+            BLAS.trsm!('L', 'U', 'N', 'N', -one(T), view(X, 1:j0, 1:j0), B)
+            @views X[jr1:jr1+nb-1, 1:j0] .= B[1:j0, 1:nb]'
         end
     end
 
