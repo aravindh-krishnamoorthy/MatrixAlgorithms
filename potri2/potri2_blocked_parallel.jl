@@ -10,44 +10,53 @@
 # "Matrix Inversion Using Cholesky Decomposition", by Aravindh Krishnamoorthy
 #   and Deepak Menon, arXiv:1111.4144.
 ################################################################################
-# Blocked parallel version refactored from potri2_blocked_parallel.jl.
-# The underlying blocked algorithm is unchanged. The diagonal and off-diagonal
-# computations are factored into block-local kernels, and the block traversal is
-# scheduled by anti-diagonal wavefronts.
+# Blocked parallel version
+#
+# Notes:
+# - This refactor keeps the blocked algorithm from potri2_blocked_parallel.jl.
+# - Anti-diagonal wavefront scheduling is applied on OUTER square blocks of size
+#   bs_col.
+# - bs_row is used only as an INNER row-panel size inside potri2_bo!, so the
+#   off-diagonal block solve can be performed in smaller row chunks.
+# - This implementation is for uplo = 'L'.
 ################################################################################
+
 const BLAS = LinearAlgebra.BLAS
 
 @inline _bstart(b::Integer, bs::Integer) = (b - 1) * bs + 1
 @inline _bstop(b::Integer, bs::Integer, n::Integer) = min(b * bs, n)
 @inline _brange(b::Integer, bs::Integer, n::Integer) = _bstart(b, bs):_bstop(b, bs, n)
-@inline _bsize(b::Integer, bs::Integer, n::Integer) = length(_brange(b, bs, n))
 
 @inline function potri2_bd!(
     X::StridedMatrix{T},
-    br::Integer,
-    bs::Integer,
-    Bblk::StridedMatrix{T},
+    bdiag::Integer,
+    bs_col::Integer,
+    W::StridedMatrix{T},
     bvec::StridedVector{T},
     rhs::StridedVector{T},
 ) where {T<:LinearAlgebra.BlasFloat}
     n  = size(X, 1)
-    rr = _brange(br, bs, n)
-    jb = length(rr)
-    j  = last(rr)
+    jr = _brange(bdiag, bs_col, n)
+    jb = length(jr)
+    j  = last(jr)
 
-    Tinit = view(Bblk, 1:jb, 1:jb)
+    Tinit = view(W, 1:jb, 1:jb)
     if j < n
-        BLAS.gemm!('N', 'N', one(T), view(X, rr, j+1:n), view(X, j+1:n, rr), zero(T), Tinit)
+        BLAS.gemm!('N', 'N', one(T), view(X, jr, j+1:n), view(X, j+1:n, jr), zero(T), Tinit)
     else
         fill!(Tinit, zero(T))
     end
 
-    _potri2_inner!(view(X, rr, rr), Tinit, view(bvec, 1:jb), view(rhs, 1:jb))
+    _potri2_inner!(view(X, jr, jr), Tinit, view(bvec, 1:jb), view(rhs, 1:jb))
     return X
 end
 
-@inline function _potri2_inner!(R::StridedMatrix{T}, Tinit::StridedMatrix{T},
-                                         b::StridedVector{T}, rhs::StridedVector{T}) where {T<:LinearAlgebra.BlasFloat}
+@inline function _potri2_inner!(
+    R::StridedMatrix{T},
+    Tinit::StridedMatrix{T},
+    b::StridedVector{T},
+    rhs::StridedVector{T},
+) where {T<:LinearAlgebra.BlasFloat}
     n = size(R, 1)
     @inbounds for i = 1:n
         b[i] = Tinit[i, n]
@@ -92,50 +101,81 @@ end
     X::StridedMatrix{T},
     brow::Integer,
     bcol::Integer,
-    bs::Integer,
+    bs_col::Integer,
+    bs_row::Integer,
     W::StridedMatrix{T},
 ) where {T<:LinearAlgebra.BlasFloat}
     n = size(X, 1)
     @assert brow > bcol
 
-    rr = _brange(brow, bs, n)
-    cr = _brange(bcol, bs, n)
-    jb = length(rr)
-    ib = length(cr)
-    j  = last(rr)
+    # Current diagonal block columns (the RHS block columns)
+    jr = _brange(brow, bs_col, n)
+    jb = length(jr)
+    j  = last(jr)
 
-    B = view(W, 1:ib, 1:jb)
+    # Earlier block rows / columns for this off-diagonal block
+    cr = _brange(bcol, bs_col, n)
+    cb = length(cr)
 
-    # Trailing update from blocks to the right of the current block-row.
+    # Workspace B corresponds to the original whole-column solve restricted to
+    # rows cr and columns jr:
+    #
+    #   U(cr,cr) * B = -( X(cr,j+1:n)X(j+1:n,jr) + X(cr,jr)X(jr,jr)
+    #                    + sum_{p=bcol+1}^{brow-1} X(cr,pr) * B_pr )
+    #
+    # The final output block is X(jr,cr) = B'.
+    B = view(W, 1:cb, 1:jb)
+
+    # Trailing update contribution: X(cr, j+1:n) * X(j+1:n, jr)
     if j < n
-        BLAS.gemm!('N', 'N', one(T), view(X, cr, j+1:n), view(X, j+1:n, rr), zero(T), B)
+        BLAS.gemm!('N', 'N', one(T), view(X, cr, j+1:n), view(X, j+1:n, jr), zero(T), B)
     else
         fill!(B, zero(T))
     end
 
-    # Local contribution from the current diagonal block.
-    BLAS.gemm!('N', 'N', one(T), view(X, cr, rr), view(X, rr, rr), one(T), B)
+    # Local diagonal-block contribution: X(cr, jr) * X(jr, jr)
+    BLAS.gemm!('N', 'N', one(T), view(X, cr, jr), view(X, jr, jr), one(T), B)
 
-    # Block backward-substitution contribution from already computed blocks
-    # on the same block-row: sum_{p=bcol+1}^{brow-1} X[cr, pr] * X[rr, pr]'.
+    # Contributions from already-computed blocks to the right in the same output row:
+    # B_pr is stored as X(jr, pr)', so use gemm with transposed second factor.
     for bp = bcol+1:brow-1
-        pr = _brange(bp, bs, n)
-        BLAS.gemm!('N', 'C', one(T), view(X, cr, pr), view(X, rr, pr), one(T), B)
+        pr = _brange(bp, bs_col, n)
+        BLAS.gemm!('N', 'C', one(T), view(X, cr, pr), view(X, jr, pr), one(T), B)
     end
 
-    # Solve with the local leading diagonal block from the still-unprocessed
-    # triangular factor: B <- -X[cr, cr]^{-1} * B.
-    BLAS.trsm!('L', 'U', 'N', 'N', -one(T), view(X, cr, cr), B)
+    # Now solve U(cr,cr) * B = -B using INNER row panels of height bs_row.
+    # This is just blocked back-substitution inside the current outer block.
+    for pend = cb:-bs_row:1
+        pstart = max(1, pend - bs_row + 1)
+        ploc   = pstart:pend
+        pr     = cr[ploc]
+        P      = view(B, ploc, :)
 
-    # Store only the computed output block in the lower triangle.
-    @views X[rr, cr] .= B'
+        # Coupling from panels to the right inside the same outer block.
+        if pend < cb
+            qloc = (pend + 1):cb
+            qr   = cr[qloc]
+            BLAS.gemm!('N', 'N', one(T), view(X, pr, qr), view(B, qloc, :), one(T), P)
+        end
+
+        # Diagonal panel solve.
+        BLAS.trsm!('L', 'U', 'N', 'N', -one(T), view(X, pr, pr), P)
+    end
+
+    @views X[jr, cr] .= B'
     return X
 end
 
-function potri2_blocked_parallel!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:LinearAlgebra.BlasFloat}
+function potri2_blocked_parallel!(
+    uplo::Char,
+    X::StridedMatrix{T};
+    bs_col::Int = 64,
+    bs_row::Int = bs_col,
+) where {T<:LinearAlgebra.BlasFloat}
     n = size(X, 1)
     @assert size(X, 2) == n
-    @assert bs > 0
+    @assert bs_col > 0
+    @assert bs_row > 0
 
     if uplo == 'U'
         @inbounds for i = 1:n
@@ -153,13 +193,13 @@ function potri2_blocked_parallel!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) w
         end
     end
 
-    nblk = cld(n, bs)
+    nblk = cld(n, bs_col)
     nt   = Threads.maxthreadid()
-    Bwrk = [Matrix{T}(undef, bs, bs) for _ = 1:nt]
-    bwrk = [Vector{T}(undef, bs) for _ = 1:nt]
-    xwrk = [Vector{T}(undef, bs) for _ = 1:nt]
+    Wwrk = [Matrix{T}(undef, bs_col, bs_col) for _ = 1:nt]
+    bwrk = [Vector{T}(undef, bs_col) for _ = 1:nt]
+    xwrk = [Vector{T}(undef, bs_col) for _ = 1:nt]
 
-    # Anti-diagonal wavefront on the lower-triangular block matrix.
+    # Anti-diagonal wavefront on OUTER square blocks of size bs_col.
     # Wave index is brow + bcol, traversed from bottom-right to top-left.
     for wave = 2nblk:-1:2
         clo = max(1, wave - nblk)
@@ -173,9 +213,9 @@ function potri2_blocked_parallel!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) w
 
             tid = Threads.threadid()
             if brow == bcol
-                potri2_bd!(X, brow, bs, Bwrk[tid], bwrk[tid], xwrk[tid])
+                potri2_bd!(X, brow, bs_col, Wwrk[tid], bwrk[tid], xwrk[tid])
             else
-                potri2_bo!(X, brow, bcol, bs, Bwrk[tid])
+                potri2_bo!(X, brow, bcol, bs_col, bs_row, Wwrk[tid])
             end
         end
     end
