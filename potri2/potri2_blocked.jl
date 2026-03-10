@@ -13,6 +13,49 @@
 # Blocked version
 ################################################################################
 const BLAS = LinearAlgebra.BLAS
+
+@inline function _potri2_inner!(R::StridedMatrix{T}, Tinit::StridedMatrix{T},
+                                         b::StridedVector{T}, rhs::StridedVector{T}) where {T<:LinearAlgebra.BlasFloat}
+    n = size(R, 1)
+    @inbounds for i = 1:n
+        b[i] = Tinit[i, n]
+    end
+
+    @views for j = n:-1:1
+        x = view(rhs, 1:j)
+        copyto!(x, view(b, 1:j))
+        @inbounds for i = 1:j
+            x[i] = -x[i]
+        end
+        @inbounds x[j] += one(T)
+
+        A = view(R, 1:j, 1:j)
+        BLAS.trsv!('U', 'N', 'N', A, x)
+
+        @inbounds for i = 1:j
+            R[j, i] = conj(x[i])
+        end
+
+        if j > 1
+            A2 = view(R, 1:j-1, j:n)
+            v  = view(R, j:n, j-1)
+            y  = view(b, 1:j-1)
+            BLAS.gemv!('N', one(T), A2, v, zero(T), y)
+            @inbounds for i = 1:j-1
+                y[i] += Tinit[i, j-1]
+            end
+        end
+    end
+
+    @inbounds for i = 1:n
+        for j = i+1:n
+            R[i, j] = conj(R[j, i])
+        end
+    end
+
+    return R
+end
+
 function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:LinearAlgebra.BlasFloat}
     n = size(X, 1)
     @assert size(X, 2) == n
@@ -59,46 +102,4 @@ function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:
     end
     X .= Hermitian(X, :L)
     return X
-end
-
-@inline function _potri2_inner!(R::StridedMatrix{T}, Tinit::StridedMatrix{T},
-                                         b::StridedVector{T}, rhs::StridedVector{T}) where {T<:LinearAlgebra.BlasFloat}
-    n = size(R, 1)
-    @inbounds for i = 1:n
-        b[i] = Tinit[i, n]
-    end
-
-    @views for j = n:-1:1
-        x = view(rhs, 1:j)
-        copyto!(x, view(b, 1:j))
-        @inbounds for i = 1:j
-            x[i] = -x[i]
-        end
-        @inbounds x[j] += one(T)
-
-        A = view(R, 1:j, 1:j)
-        BLAS.trsv!('U', 'N', 'N', A, x)
-
-        @inbounds for i = 1:j
-            R[j, i] = conj(x[i])
-        end
-
-        if j > 1
-            A2 = view(R, 1:j-1, j:n)
-            v  = view(R, j:n, j-1)
-            y  = view(b, 1:j-1)
-            BLAS.gemv!('N', one(T), A2, v, zero(T), y)
-            @inbounds for i = 1:j-1
-                y[i] += Tinit[i, j-1]
-            end
-        end
-    end
-
-    @inbounds for i = 1:n
-        for j = i+1:n
-            R[i, j] = conj(R[j, i])
-        end
-    end
-
-    return R
 end
