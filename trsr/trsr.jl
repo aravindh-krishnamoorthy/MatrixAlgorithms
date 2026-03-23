@@ -97,78 +97,6 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     Tc = Complex{RT}
     Ac = Matrix{Tc}(A)
 
-    function _basis_complement(B, S; need::Union{Nothing,Int}=nothing)
-        Bc = Matrix{Tc}(B)
-        Sc = Matrix{Tc}(S)
-        size(Bc, 2) == 0 && return zeros(Tc, size(Bc, 1), 0)
-
-        if size(Sc, 2) > 0
-            U, σ, _ = svd(Sc; full=false)
-            tolS = max(atol, rtol * (isempty(σ) ? zero(RT) : maximum(abs, σ)))
-            rs = count(x -> abs(x) > tolS, σ)
-            Sorth = rs == 0 ? zeros(Tc, size(Sc, 1), 0) : U[:, 1:rs]
-        else
-            Sorth = zeros(Tc, size(Bc, 1), 0)
-        end
-
-        Y = copy(Bc)
-        if size(Sorth, 2) > 0
-            Y .-= Sorth * (Sorth' * Y)
-        end
-
-        U, σ, _ = svd(Y; full=false)
-        tolY = max(atol, rtol * (isempty(σ) ? zero(RT) : maximum(abs, σ)))
-        rloc = count(x -> abs(x) > tolY, σ)
-
-        if need !== nothing
-            rloc < need && throw(ArgumentError("gantmacher!: numerically ambiguous nilpotent chain structure."))
-            rloc = need
-        end
-
-        return rloc == 0 ? zeros(Tc, size(Bc, 1), 0) : U[:, 1:rloc]
-    end
-
-    function _nullity_basis(M)
-        N = nullspace(M; atol=atol, rtol=rtol)
-        return Matrix{Tc}(N), size(N, 2)
-    end
-
-    function _blockdiag(blocks)
-        Ntot = sum(size(B, 1) for B in blocks)
-        X = zeros(Tc, Ntot, Ntot)
-        p = 1
-        for B in blocks
-            q = p + size(B, 1) - 1
-            X[p:q, p:q] .= Matrix{Tc}(B)
-            p = q + 1
-        end
-        return X
-    end
-
-    function _jordanblock(λ, k::Int)
-        J = zeros(Tc, k, k)
-        for i = 1:k
-            J[i, i] = λ
-        end
-        for i = 1:k-1
-            J[i, i+1] = one(Tc)
-        end
-        return J
-    end
-
-    function _solve_coupling(U1, U0, B)
-        r1 = size(U1, 1)
-        r0 = size(U0, 1)
-        if r1 == 0
-            return zeros(Tc, 0, r0)
-        elseif r0 == 0
-            return zeros(Tc, r1, 0)
-        end
-        Ksys = kron(Matrix{Tc}(I, r0, r0), U1) + kron(transpose(U0), Matrix{Tc}(I, r1, r1))
-        y = Ksys \ vec(Matrix{Tc}(B))
-        return reshape(y, r1, r0)
-    end
-
     S = schur(Ac)
     scale_vals = isempty(S.values) ? zero(RT) : maximum(abs, S.values)
     scale_mat  = opnorm(Ac, 1)
@@ -185,6 +113,7 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
         return Qord * trsr!(copy(Tord)) * Qord'
     end
 
+    local T1, T0, B
     if r == 0
         T1 = zeros(Tc, 0, 0)
         T0 = Tord
@@ -211,7 +140,9 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     stabilized = false
     for k = 1:m0
         Pk = Pk * T0
-        K[k+1], ν[k+1] = _nullity_basis(Pk)
+        N = nullspace(Pk; atol=atol, rtol=rtol)
+        K[k+1] = Matrix{Tc}(N)
+        ν[k+1] = size(N, 2)
         if ν[k+1] == m0
             for j = k+1:m0
                 K[j+1] = K[k+1]
@@ -253,7 +184,34 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
         end
 
         Sspan = size(K[k], 2) == 0 ? G : (size(G, 2) == 0 ? K[k] : hcat(K[k], G))
-        heads[k] = _basis_complement(K[k+1], Sspan; need=need)
+
+        Bc = Matrix{Tc}(K[k+1])
+        Sc = Matrix{Tc}(Sspan)
+        size(Bc, 2) == 0 && throw(ArgumentError("gantmacher!: numerically ambiguous nilpotent chain structure."))
+
+        local Sorth
+        if size(Sc, 2) > 0
+            U, σ, _ = svd(Sc; full=false)
+            tolS = max(atol, rtol * (isempty(σ) ? zero(RT) : maximum(abs, σ)))
+            rs = count(x -> abs(x) > tolS, σ)
+            Sorth = rs == 0 ? zeros(Tc, size(Sc, 1), 0) : U[:, 1:rs]
+        else
+            Sorth = zeros(Tc, size(Bc, 1), 0)
+        end
+
+        Y = copy(Bc)
+        if size(Sorth, 2) > 0
+            Y .-= Sorth * (Sorth' * Y)
+        end
+
+        U, σ, _ = svd(Y; full=false)
+        tolY = max(atol, rtol * (isempty(σ) ? zero(RT) : maximum(abs, σ)))
+        rloc = count(x -> abs(x) > tolY, σ)
+
+        rloc < need && throw(ArgumentError("gantmacher!: numerically ambiguous nilpotent chain structure."))
+        rloc = need
+
+        heads[k] = rloc == 0 ? zeros(Tc, size(Bc, 1), 0) : U[:, 1:rloc]
     end
 
     chains = Vector{Vector{Tc}}()
@@ -289,7 +247,13 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
             t = parts[i+1]
             (s - t <= 1) || throw(ArgumentError("gantmacher!: inferred nilpotent block partition does not admit a square root."))
             rpair = s + t
-            Jnil = _jordanblock(zero(Tc), rpair)
+            Jnil = zeros(Tc, rpair, rpair)
+            for ii = 1:rpair
+                Jnil[ii, ii] = zero(Tc)
+            end
+            for ii = 1:rpair-1
+                Jnil[ii, ii+1] = one(Tc)
+            end
             perm = vcat(collect(1:2:rpair), collect(2:2:rpair))
             Pperm = zeros(Tc, rpair, rpair)
             for j = 1:rpair
@@ -300,7 +264,15 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
         end
     end
 
-    YJ = _blockdiag(pieces)
+    Ntot = sum(size(Bi, 1) for Bi in pieces)
+    YJ = zeros(Tc, Ntot, Ntot)
+    p = 1
+    for Bi in pieces
+        q = p + size(Bi, 1) - 1
+        YJ[p:q, p:q] .= Matrix{Tc}(Bi)
+        p = q + 1
+    end
+
     size(YJ, 1) == m0 || throw(ArgumentError("gantmacher!: internal size mismatch in nilpotent model block."))
 
     U0 = V * YJ / V
@@ -309,7 +281,19 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
         return Qord * U0 * Qord'
     end
 
-    Y = _solve_coupling(U1, U0, B)
+    r1 = size(U1, 1)
+    r0 = size(U0, 1)
+    local Y
+    if r1 == 0
+        Y = zeros(Tc, 0, r0)
+    elseif r0 == 0
+        Y = zeros(Tc, r1, 0)
+    else
+        Ksys = kron(Matrix{Tc}(I, r0, r0), U1) + kron(transpose(U0), Matrix{Tc}(I, r1, r1))
+        y = Ksys \ vec(Matrix{Tc}(B))
+        Y = reshape(y, r1, r0)
+    end
+
     Uord = zeros(Tc, n, n)
     Uord[1:r, 1:r] = U1
     Uord[1:r, r+1:n] = Y
