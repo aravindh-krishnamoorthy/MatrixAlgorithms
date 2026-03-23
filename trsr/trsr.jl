@@ -256,7 +256,7 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
         H = heads[k]
         for j = 1:size(H, 2)
             h = H[:, j]
-            for p = 0:k-1
+            for p = k-1:-1:0
                 push!(chains, powers[p+1] * h)
             end
             push!(parts, k)
