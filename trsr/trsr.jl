@@ -166,17 +166,39 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
 
     RT = typeof(real(float(one(T))))
     Tc = Complex{RT}
-    Ac = Matrix{Tc}(A)
+
+    Ac = Matrix{Tc}(undef, n, n)
+    @inbounds for j = 1:n
+        for i = 1:n
+            Ac[i, j] = A[i, j]
+        end
+    end
 
     S = schur(Ac)
-    scale_vals = isempty(S.values) ? zero(RT) : maximum(abs, S.values)
-    scale_mat  = opnorm(Ac, 1)
+
+    scale_vals = zero(RT)
+    @inbounds for i = 1:length(S.values)
+        ai = abs(S.values[i])
+        if ai > scale_vals
+            scale_vals = ai
+        end
+    end
+    scale_mat = opnorm(Ac, 1)
     scale = max(scale_vals, scale_mat)
     tol0 = max(atol, rtol * scale)
-    select = map(λ -> abs(λ) > tol0, S.values)
+
+    select = Vector{Bool}(undef, n)
+    r = 0
+    @inbounds for i = 1:n
+        keep = abs(S.values[i]) > tol0
+        select[i] = keep
+        if keep
+            r += 1
+        end
+    end
+
     S = ordschur(S, select)
 
-    r = count(select)
     Tord = Matrix{Tc}(S.T)
     Qord = Matrix{Tc}(S.Z)
 
@@ -184,26 +206,28 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
         return Qord * trsr!(copy(Tord)) * Qord'
     end
 
-    local T1, T0, B
-    if r == 0
-        T1 = zeros(Tc, 0, 0)
-        T0 = Tord
-        B = zeros(Tc, 0, n)
-    else
-        T1 = Tord[1:r, 1:r]
-        T0 = Tord[r+1:n, r+1:n]
-        B = Tord[1:r, r+1:n]
+    m0 = n - r
+
+    T1 = Matrix{Tc}(undef, r, r)
+    T0 = Matrix{Tc}(undef, m0, m0)
+    B  = Matrix{Tc}(undef, r, m0)
+
+    if r > 0
+        @views copyto!(T1, Tord[1:r, 1:r])
+        @views copyto!(B,  Tord[1:r, r+1:n])
+    end
+    if m0 > 0
+        @views copyto!(T0, Tord[r+1:n, r+1:n])
     end
 
     U1 = r == 0 ? zeros(Tc, 0, 0) : trsr!(copy(T1))
 
-    m0 = size(T0, 1)
     if m0 == 0
         return Qord * U1 * Qord'
     end
 
     K = Vector{Matrix{Tc}}(undef, m0 + 1)
-    ν = zeros(Int, m0 + 1)
+    ν = Vector{Int}(undef, m0 + 1)
     K[1] = zeros(Tc, m0, 0)
     ν[1] = 0
 
@@ -212,12 +236,14 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     for k = 1:m0
         Pk = Pk * T0
         N = nullspace(Pk; atol=atol, rtol=rtol)
-        K[k+1] = Matrix{Tc}(N)
-        ν[k+1] = size(N, 2)
-        if ν[k+1] == m0
+        Nk = Matrix{Tc}(N)
+        K[k + 1] = Nk
+        νk = size(Nk, 2)
+        ν[k + 1] = νk
+        if νk == m0
             for j = k+1:m0
-                K[j+1] = K[k+1]
-                ν[j+1] = m0
+                K[j + 1] = Nk
+                ν[j + 1] = m0
             end
             stabilized = true
             break
@@ -225,122 +251,200 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     end
     stabilized || throw(ArgumentError("gantmacher!: failed to identify a numerically nilpotent zero-primary block."))
 
-    d = zeros(Int, m0)
-    for k = 1:m0
-        d[k] = ν[k+1] - ν[k]
+    d = Vector{Int}(undef, m0)
+    @inbounds for k = 1:m0
+        d[k] = ν[k + 1] - ν[k]
     end
 
-    b = zeros(Int, m0)
-    for k = 1:m0-1
-        b[k] = d[k] - d[k+1]
+    b = Vector{Int}(undef, m0)
+    @inbounds for k = 1:m0-1
+        b[k] = d[k] - d[k + 1]
     end
     b[m0] = d[m0]
 
     powers = Vector{Matrix{Tc}}(undef, m0 + 1)
     powers[1] = Matrix{Tc}(I, m0, m0)
     for k = 1:m0
-        powers[k+1] = powers[k] * T0
+        powers[k + 1] = powers[k] * T0
     end
 
-    heads = [zeros(Tc, m0, 0) for _ = 1:m0]
+    heads = Vector{Matrix{Tc}}(undef, m0)
+    for k = 1:m0
+        heads[k] = zeros(Tc, m0, 0)
+    end
+
     for k = m0:-1:1
         need = b[k]
         need == 0 && continue
 
-        G = zeros(Tc, m0, 0)
+        gcols = 0
         for j = k+1:m0
-            if size(heads[j], 2) > 0
-                G = hcat(G, powers[j-k+1] * heads[j])
+            gcols += size(heads[j], 2)
+        end
+
+        G = zeros(Tc, m0, gcols)
+        col = 1
+        for j = k+1:m0
+            Hj = heads[j]
+            hjcols = size(Hj, 2)
+            if hjcols > 0
+                block = powers[j - k + 1] * Hj
+                @views G[:, col:col + hjcols - 1] .= block
+                col += hjcols
             end
         end
 
-        Sspan = size(K[k], 2) == 0 ? G : (size(G, 2) == 0 ? K[k] : hcat(K[k], G))
+        Kk  = K[k]
+        Kk1 = K[k + 1]
+        nk  = size(Kk, 2)
+        nk1 = size(Kk1, 2)
 
-        Bc = Matrix{Tc}(K[k+1])
-        Sc = Matrix{Tc}(Sspan)
-        size(Bc, 2) == 0 && throw(ArgumentError("gantmacher!: numerically ambiguous nilpotent chain structure."))
-
-        local Sorth
-        if size(Sc, 2) > 0
-            U, σ, _ = svd(Sc; full=false)
-            tolS = max(atol, rtol * (isempty(σ) ? zero(RT) : maximum(abs, σ)))
-            rs = count(x -> abs(x) > tolS, σ)
-            Sorth = rs == 0 ? zeros(Tc, size(Sc, 1), 0) : U[:, 1:rs]
-        else
-            Sorth = zeros(Tc, size(Bc, 1), 0)
+        Sspan = zeros(Tc, m0, nk + gcols)
+        if nk > 0
+            @views Sspan[:, 1:nk] .= Kk
+        end
+        if gcols > 0
+            @views Sspan[:, nk+1:nk+gcols] .= G
         end
 
-        Y = copy(Bc)
+        nk1 == 0 && throw(ArgumentError("gantmacher!: numerically ambiguous nilpotent chain structure."))
+
+        local Sorth
+        if size(Sspan, 2) > 0
+            F = svd(Sspan; full=false)
+            σ = F.S
+            σmax = isempty(σ) ? zero(RT) : maximum(abs, σ)
+            tolS = max(atol, rtol * σmax)
+            rs = 0
+            @inbounds for i = 1:length(σ)
+                if abs(σ[i]) > tolS
+                    rs += 1
+                end
+            end
+            Sorth = rs == 0 ? zeros(Tc, m0, 0) : Matrix{Tc}(F.U[:, 1:rs])
+        else
+            Sorth = zeros(Tc, m0, 0)
+        end
+
+        Y = copy(Kk1)
         if size(Sorth, 2) > 0
             Y .-= Sorth * (Sorth' * Y)
         end
 
-        U, σ, _ = svd(Y; full=false)
-        tolY = max(atol, rtol * (isempty(σ) ? zero(RT) : maximum(abs, σ)))
-        rloc = count(x -> abs(x) > tolY, σ)
+        FY = svd(Y; full=false)
+        σY = FY.S
+        σYmax = isempty(σY) ? zero(RT) : maximum(abs, σY)
+        tolY = max(atol, rtol * σYmax)
+
+        rloc = 0
+        @inbounds for i = 1:length(σY)
+            if abs(σY[i]) > tolY
+                rloc += 1
+            end
+        end
 
         rloc < need && throw(ArgumentError("gantmacher!: numerically ambiguous nilpotent chain structure."))
-        rloc = need
-
-        heads[k] = rloc == 0 ? zeros(Tc, size(Bc, 1), 0) : U[:, 1:rloc]
+        heads[k] = need == 0 ? zeros(Tc, m0, 0) : Matrix{Tc}(FY.U[:, 1:need])
     end
 
-    chains = Vector{Vector{Tc}}()
-    parts = Int[]
+    nchains = 0
+    for k = 1:m0
+        nchains += size(heads[k], 2)
+    end
+    nchains == 0 && throw(ArgumentError("gantmacher!: failed to construct any nilpotent chains."))
+
+    chains = Vector{Vector{Tc}}(undef, m0)
+    parts = Vector{Int}(undef, nchains)
+
+    chain_idx = 1
+    part_idx = 1
     for k = m0:-1:1
         H = heads[k]
-        for j = 1:size(H, 2)
-            h = H[:, j]
+        hcols = size(H, 2)
+        for j = 1:hcols
+            h = @view H[:, j]
             for p = k-1:-1:0
-                push!(chains, powers[p+1] * h)
+                chains[chain_idx] = powers[p + 1] * h
+                chain_idx += 1
             end
-            push!(parts, k)
+            parts[part_idx] = k
+            part_idx += 1
         end
     end
 
-    length(chains) == 0 && throw(ArgumentError("gantmacher!: failed to construct any nilpotent chains."))
+    V = Matrix{Tc}(undef, m0, m0)
+    for j = 1:m0
+        V[:, j] = chains[j]
+    end
 
-    V = hcat(chains...)
     size(V, 2) == m0 || throw(ArgumentError("gantmacher!: failed to construct a full nilpotent chain basis."))
-    rank(V; atol=atol, rtol=rtol) < m0 && throw(ArgumentError("gantmacher!: numerically singular chain basis for the zero-primary block."))
+    rank(V; atol=atol, rtol=rtol) < m0 &&
+        throw(ArgumentError("gantmacher!: numerically singular chain basis for the zero-primary block."))
 
     sort!(parts, rev=true)
 
-    pieces = Matrix{Tc}[]
+    npieces = 0
     i = 1
     while i <= length(parts)
         if i == length(parts)
             parts[i] == 1 || throw(ArgumentError("gantmacher!: inferred nilpotent block partition does not admit a square root."))
-            push!(pieces, zeros(Tc, 1, 1))
+            npieces += 1
             i += 1
         else
             s = parts[i]
-            t = parts[i+1]
+            t = parts[i + 1]
             (s - t <= 1) || throw(ArgumentError("gantmacher!: inferred nilpotent block partition does not admit a square root."))
-            rpair = s + t
-            Jnil = zeros(Tc, rpair, rpair)
-            for ii = 1:rpair
-                Jnil[ii, ii] = zero(Tc)
-            end
-            for ii = 1:rpair-1
-                Jnil[ii, ii+1] = one(Tc)
-            end
-            perm = vcat(collect(1:2:rpair), collect(2:2:rpair))
-            Pperm = zeros(Tc, rpair, rpair)
-            for j = 1:rpair
-                Pperm[perm[j], j] = one(Tc)
-            end
-            push!(pieces, Pperm' * Jnil * Pperm)
+            npieces += 1
             i += 2
         end
     end
 
-    Ntot = sum(size(Bi, 1) for Bi in pieces)
-    YJ = zeros(Tc, Ntot, Ntot)
+    pieces = Vector{Matrix{Tc}}(undef, npieces)
+    piece_idx = 1
+    i = 1
+    while i <= length(parts)
+        if i == length(parts)
+            pieces[piece_idx] = zeros(Tc, 1, 1)
+            piece_idx += 1
+            i += 1
+        else
+            s = parts[i]
+            t = parts[i + 1]
+            rpair = s + t
+
+            Jnil = zeros(Tc, rpair, rpair)
+            for ii = 1:rpair-1
+                Jnil[ii, ii + 1] = one(Tc)
+            end
+
+            perm = Vector{Int}(undef, rpair)
+            idx = 1
+            for ii = 1:2:rpair
+                perm[idx] = ii
+                idx += 1
+            end
+            for ii = 2:2:rpair
+                perm[idx] = ii
+                idx += 1
+            end
+
+            Pperm = zeros(Tc, rpair, rpair)
+            for j = 1:rpair
+                Pperm[perm[j], j] = one(Tc)
+            end
+
+            pieces[piece_idx] = Pperm' * Jnil * Pperm
+            piece_idx += 1
+            i += 2
+        end
+    end
+
+    YJ = zeros(Tc, m0, m0)
     p = 1
-    for Bi in pieces
+    for idx = 1:npieces
+        Bi = pieces[idx]
         q = p + size(Bi, 1) - 1
-        YJ[p:q, p:q] .= Matrix{Tc}(Bi)
+        @views YJ[p:q, p:q] .= Bi
         p = q + 1
     end
 
@@ -348,27 +452,25 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
 
     U0 = V * YJ / V
 
-    if r == 0
-        return Qord * U0 * Qord'
-    end
-
-    r1 = size(U1, 1)
-    r0 = size(U0, 1)
     local Y
-    if r1 == 0
-        Y = zeros(Tc, 0, r0)
-    elseif r0 == 0
-        Y = zeros(Tc, r1, 0)
+    if r == 0
+        Y = zeros(Tc, 0, m0)
+    elseif m0 == 0
+        Y = zeros(Tc, r, 0)
     else
-        Ksys = kron(Matrix{Tc}(I, r0, r0), U1) + kron(transpose(U0), Matrix{Tc}(I, r1, r1))
-        y = Ksys \ vec(Matrix{Tc}(B))
-        Y = reshape(y, r1, r0)
+        I0 = Matrix{Tc}(I, m0, m0)
+        I1 = Matrix{Tc}(I, r, r)
+        Ksys = kron(I0, U1) + kron(transpose(U0), I1)
+        y = Ksys \ vec(B)
+        Y = reshape(y, r, m0)
     end
 
     Uord = zeros(Tc, n, n)
-    Uord[1:r, 1:r] = U1
-    Uord[1:r, r+1:n] = Y
-    Uord[r+1:n, r+1:n] = U0
+    if r > 0
+        @views Uord[1:r, 1:r] .= U1
+        @views Uord[1:r, r+1:n] .= Y
+    end
+    @views Uord[r+1:n, r+1:n] .= U0
 
     X = Qord * Uord * Qord'
 
