@@ -41,7 +41,9 @@ function sqrtm(A::AbstractMatrix{T}; atol::Real = 0,
         end
     elseif isreal(A)
         S = schur(real(A))
-        scale = isempty(S.values) ? zero(real(float(one(T)))) : maximum(abs, S.values)
+        scale_vals = isempty(S.values) ? zero(real(float(one(T)))) : maximum(abs, S.values)
+        scale_mat  = opnorm(real(A), 1)
+        scale = max(scale_vals, scale_mat)
         tol = max(atol, rtol*scale)
         negative = false
         for i = 1:n
@@ -56,19 +58,21 @@ function sqrtm(A::AbstractMatrix{T}; atol::Real = 0,
             S = Schur{Complex}(S)
         end
         if use_gantmacher
-            return S.Z*gantmacher!(S.T; atol=atol, rtol=rtol)*S.Z'
+            return S.Z * gantmacher!(S.T; atol=atol, rtol=rtol) * S.Z'
         else
-            return S.Z*trsr!(S.T)*S.Z'
+            return S.Z * trsr!(S.T) * S.Z'
         end
     else # complex A
         S = schur(A)
-        scale = isempty(S.values) ? zero(real(float(one(T)))) : maximum(abs, S.values)
+        scale_vals = isempty(S.values) ? zero(real(float(one(T)))) : maximum(abs, S.values)
+        scale_mat  = opnorm(A, 1)
+        scale = max(scale_vals, scale_mat)
         tol = max(atol, rtol*scale)
         rankA = count(λ -> abs(λ) > tol, S.values)
         if rankA < n - 1
-            return S.Z*gantmacher!(S.T; atol=atol, rtol=rtol)*S.Z'
+            return S.Z * gantmacher!(S.T; atol=atol, rtol=rtol) * S.Z'
         else
-            return S.Z*trsr!(S.T)*S.Z'
+            return S.Z * trsr!(S.T) * S.Z'
         end
     end
 end
@@ -97,28 +101,34 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     function _basis_complement(B, S; need::Union{Nothing,Int}=nothing)
         Bc = Matrix{Tc}(B)
         Sc = Matrix{Tc}(S)
-        if size(Bc, 2) == 0
-            return zeros(Tc, size(Bc, 1), 0)
-        end
-        Y = copy(Bc)
+
+        nb = size(Bc, 2)
+        nb == 0 && return zeros(Tc, size(Bc, 1), 0)
+
         if size(Sc, 2) > 0
-            Y .-= Sc * (Sc' * Y)
+            U, σ, _ = svd(Sc; full=false)
+            tolS = max(atol, rtol * (isempty(σ) ? zero(RT) : maximum(abs, σ)))
+            rs = count(x -> abs(x) > tolS, σ)
+            Sorth = rs == 0 ? zeros(Tc, size(Sc, 1), 0) : U[:, 1:rs]
+        else
+            Sorth = zeros(Tc, size(Bc, 1), 0)
         end
-        F = qr(Y)
-        Q = Matrix(F.Q)
-        R = Matrix(F.R)
-        r = 0
-        t = max(atol, rtol * (isempty(R) ? zero(RT) : maximum(abs, diag(R))))
-        for j = 1:min(size(R,1), size(R,2))
-            if abs(R[j,j]) > t
-                r += 1
-            end
+
+        Y = copy(Bc)
+        if size(Sorth, 2) > 0
+            Y .-= Sorth * (Sorth' * Y)
         end
+
+        U, σ, _ = svd(Y; full=false)
+        tolY = max(atol, rtol * (isempty(σ) ? zero(RT) : maximum(abs, σ)))
+        r = count(x -> abs(x) > tolY, σ)
+
         if need !== nothing
             r < need && throw(ArgumentError("gantmacher!: numerically ambiguous nilpotent chain structure."))
             r = need
         end
-        return Q[:, 1:r]
+
+        return r == 0 ? zeros(Tc, size(Bc, 1), 0) : U[:, 1:r]
     end
 
     function _nullity_basis(M)
@@ -127,8 +137,11 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     end
 
     function _blockdiag(blocks)
-        N = sum(size(B, 1) for B in blocks)
-        X = zeros(Tc, N, N)
+        Ntot = 0
+        for B in blocks
+            Ntot += size(B, 1)
+        end
+        X = zeros(Tc, Ntot, Ntot)
         p = 1
         for B in blocks
             q = p + size(B, 1) - 1
@@ -149,34 +162,50 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
         return J
     end
 
+    function _solve_coupling(U1, U0, B)
+        r1 = size(U1, 1)
+        r0 = size(U0, 1)
+        if r1 == 0
+            return zeros(Tc, 0, r0)
+        elseif r0 == 0
+            return zeros(Tc, r1, 0)
+        end
+        Ksys = kron(Matrix{Tc}(I, r0, r0), U1) + kron(transpose(U0), Matrix{Tc}(I, r1, r1))
+        y = Ksys \ vec(Matrix{Tc}(B))
+        return reshape(y, r1, r0)
+    end
+
     S = schur(Ac)
-    scale = isempty(S.values) ? zero(RT) : maximum(abs, S.values)
-    tol0 = max(atol, rtol*scale)
+    scale_vals = isempty(S.values) ? zero(RT) : maximum(abs, S.values)
+    scale_mat  = opnorm(Ac, 1)
+    scale = max(scale_vals, scale_mat)
+    tol0 = max(atol, rtol * scale)
     select = map(λ -> abs(λ) > tol0, S.values)
     S = ordschur(S, select)
 
     r = count(select)
-    Tord = Matrix(S.T)
-    Qord = Matrix(S.Z)
+    Tord = Matrix{Tc}(S.T)
+    Qord = Matrix{Tc}(S.Z)
 
     if r == n
         return Qord * trsr!(copy(Tord)) * Qord'
-    elseif r == 0
+    end
+
+    if r == 0
         T1 = zeros(Tc, 0, 0)
-        B = zeros(Tc, 0, n)
         T0 = Tord
+        B = zeros(Tc, 0, n)
     else
         T1 = Tord[1:r, 1:r]
-        B = Tord[1:r, r+1:n]
         T0 = Tord[r+1:n, r+1:n]
+        B = Tord[1:r, r+1:n]
     end
 
     U1 = r == 0 ? zeros(Tc, 0, 0) : trsr!(copy(T1))
 
     m0 = size(T0, 1)
     if m0 == 0
-        Uord = U1
-        return Qord * Uord * Qord'
+        return Qord * U1 * Qord'
     end
 
     K = Vector{Matrix{Tc}}(undef, m0 + 1)
@@ -184,11 +213,11 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     K[1] = zeros(Tc, m0, 0)
     ν[1] = 0
 
-    P = Matrix{Tc}(I, m0, m0)
+    Pk = Matrix{Tc}(I, m0, m0)
     stabilized = false
     for k = 1:m0
-        P = P * T0
-        K[k+1], ν[k+1] = _nullity_basis(P)
+        Pk = Pk * T0
+        K[k+1], ν[k+1] = _nullity_basis(Pk)
         if ν[k+1] == m0
             for j = k+1:m0
                 K[j+1] = K[k+1]
@@ -220,16 +249,22 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     heads = [zeros(Tc, m0, 0) for _ = 1:m0]
     for k = m0:-1:1
         need = b[k]
-        if need == 0
-            continue
-        end
+        need == 0 && continue
+
         G = zeros(Tc, m0, 0)
         for j = k+1:m0
             if size(heads[j], 2) > 0
                 G = hcat(G, powers[j-k+1] * heads[j])
             end
         end
-        Sspan = hcat(K[k], G)
+
+        if size(K[k], 2) == 0
+            Sspan = G
+        elseif size(G, 2) == 0
+            Sspan = K[k]
+        else
+            Sspan = hcat(K[k], G)
+        end
         heads[k] = _basis_complement(K[k+1], Sspan; need=need)
     end
 
@@ -239,12 +274,15 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
         H = heads[k]
         for j = 1:size(H, 2)
             h = H[:, j]
-            for p = k-1:-1:0
+            for p = 0:k-1
                 push!(chains, powers[p+1] * h)
             end
             push!(parts, k)
         end
     end
+
+    length(chains) == 0 && throw(ArgumentError("gantmacher!: failed to construct any nilpotent chains."))
+
     V = hcat(chains...)
     size(V, 2) == m0 || throw(ArgumentError("gantmacher!: failed to construct a full nilpotent chain basis."))
 
@@ -253,6 +291,7 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     end
 
     sort!(parts, rev=true)
+
     pieces = Matrix{Tc}[]
     i = 1
     while i <= length(parts)
@@ -261,7 +300,8 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
             push!(pieces, zeros(Tc, 1, 1))
             i += 1
         else
-            s, t = parts[i], parts[i+1]
+            s = parts[i]
+            t = parts[i+1]
             (s - t <= 1) || throw(ArgumentError("gantmacher!: inferred nilpotent block partition does not admit a square root."))
             rpair = s + t
             Jnil = _jordanblock(zero(Tc), rpair)
@@ -276,15 +316,18 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     end
 
     YJ = _blockdiag(pieces)
+    size(YJ, 1) == m0 || throw(ArgumentError("gantmacher!: internal size mismatch in nilpotent model block."))
+
     U0 = V * YJ / V
 
     if r == 0
         Uord = U0
     else
-        Ksys = kron(Matrix{Tc}(I, m0, m0), U1) + kron(transpose(U0), Matrix{Tc}(I, r, r))
-        y = Ksys \ vec(B)
-        Y = reshape(y, r, m0)
-        Uord = [U1 Y; zeros(Tc, m0, r) U0]
+        Y = _solve_coupling(U1, U0, B)
+        Uord = zeros(Tc, n, n)
+        Uord[1:r, 1:r] = U1
+        Uord[1:r, r+1:n] = Y
+        Uord[r+1:n, r+1:n] = U0
     end
 
     X = Qord * Uord * Qord'
@@ -311,58 +354,53 @@ end
 @views @inbounds function trsr!(A::AbstractMatrix{T}) where {T}
     m, n = size(A)
     (m == n) || throw(ArgumentError("trsr!: Matrix A must be square."))
-    # Choose complex or real dot product based on T
     dot = T <: Complex ? BLAS.dotu : BLAS.dot
-    # Square roots of 1x1 and 2x2 diagonal blocks
     i = 1
-    sizes = ones(Int,n)
+    sizes = ones(Int, n)
     while i < n
-        if !iszero(A[i+1,i])
-            μ = sqrt(-real(A[i,i+1]*A[i+1,i]))
-            r = sqrt(hypot(A[i,i], μ))
-            θ = atan(μ, real(A[i,i]))
-            s, c = sincos(θ/2)
-            α, β′ = r*c, r*s/μ
-            A[i,i] = α
-            A[i+1,i+1] = α
-            A[i,i+1] = β′*A[i,i+1]
-            A[i+1,i] = β′*A[i+1,i]
+        if !iszero(A[i+1, i])
+            μ = sqrt(-real(A[i, i+1] * A[i+1, i]))
+            r = sqrt(hypot(A[i, i], μ))
+            θ = atan(μ, real(A[i, i]))
+            s, c = sincos(θ / 2)
+            α, β′ = r * c, r * s / μ
+            A[i, i] = α
+            A[i+1, i+1] = α
+            A[i, i+1] = β′ * A[i, i+1]
+            A[i+1, i] = β′ * A[i+1, i]
             sizes[i] = 2
             sizes[i+1] = 0
             i += 2
         else
-            A[i,i] = sqrt(A[i,i])
+            A[i, i] = sqrt(A[i, i])
             sizes[i] = 1
             i += 1
         end
     end
     if i == n
-        A[n,n] = sqrt(A[n,n])
+        A[n, n] = sqrt(A[n, n])
         sizes[i] = 1
     end
-    # Algorithm 4.3 in Reference [1]
     Δ = I(4)
-    M_L₀ = zeros(T,4,4)
-    M_L₁ = zeros(T,4,4)
+    M_L₀ = zeros(T, 4, 4)
+    M_L₁ = zeros(T, 4, 4)
     for k = 1:n-1
         for i = 1:n-k
             if sizes[i] == 0 || sizes[i+k] == 0
                 continue
             end
-            i₁, i₂, j₁, j₂, s₁, s₂ = i, i+sizes[i]-1, i+k, i+k+sizes[i+k]-1, sizes[i], sizes[i+k]
-            k₁, k₂ = i+s₁, i+k-1
-            L₀ = M_L₀[1:s₁*s₂,1:s₁*s₂]
-            L₁ = M_L₁[1:s₁*s₂,1:s₁*s₂]
+            i₁, i₂, j₁, j₂, s₁, s₂ = i, i + sizes[i] - 1, i + k, i + k + sizes[i+k] - 1, sizes[i], sizes[i+k]
+            k₁, k₂ = i + s₁, i + k - 1
+            L₀ = M_L₀[1:s₁*s₂, 1:s₁*s₂]
+            L₁ = M_L₁[1:s₁*s₂, 1:s₁*s₂]
             if s₁ == 1 && s₂ == 1
-                Bᵢⱼ⁽⁰⁾ = dot(A[i₁,k₁:k₂], A[k₁:k₂,j₁])
-                A[i₁,j₁] = (A[i₁,j₁] - Bᵢⱼ⁽⁰⁾)/(A[i₁,i₁] + A[j₁,j₁])
+                Bᵢⱼ⁽⁰⁾ = dot(A[i₁, k₁:k₂], A[k₁:k₂, j₁])
+                A[i₁, j₁] = (A[i₁, j₁] - Bᵢⱼ⁽⁰⁾) / (A[i₁, i₁] + A[j₁, j₁])
             else
-                # Compute Bᵢⱼ⁽⁰⁾ and update A[i₁:i₂,j₁:j₂]
-                mul!(A[i₁:i₂,j₁:j₂], A[i₁:i₂,k₁:k₂], A[k₁:k₂,j₁:j₂], T(-1.0), T(+1.0))
-                # Solve Uᵢ,ᵢ₊ₖ using Reference [1, (4.10)]
-                kron!(L₀, Δ[1:s₂,1:s₂], A[i₁:i₂,i₁:i₂])
-                L₀ .+= kron!(L₁, transpose(A[j₁:j₂,j₁:j₂]), Δ[1:s₁,1:s₁])
-                ldiv!(lu!(L₀), A[i₁:i₂,j₁:j₂][:])
+                mul!(A[i₁:i₂, j₁:j₂], A[i₁:i₂, k₁:k₂], A[k₁:k₂, j₁:j₂], T(-1.0), T(+1.0))
+                kron!(L₀, Δ[1:s₂, 1:s₂], A[i₁:i₂, i₁:i₂])
+                L₀ .+= kron!(L₁, transpose(A[j₁:j₂, j₁:j₂]), Δ[1:s₁, 1:s₁])
+                ldiv!(lu!(L₀), A[i₁:i₂, j₁:j₂][:])
             end
         end
     end
