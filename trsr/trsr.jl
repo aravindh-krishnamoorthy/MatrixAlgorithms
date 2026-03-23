@@ -8,7 +8,6 @@
 
 import Base: sqrt
 using LinearAlgebra
-using JordanForm
 
 ################################################################################
 #
@@ -51,22 +50,251 @@ function sqrtm(A::AbstractMatrix{T}; atol::Real = 0,
                 break
             end
         end
-        if negative
-            S = Schur{Complex}(S)
-            scale = isempty(S.values) ? zero(real(float(one(eltype(S.values))))) : maximum(abs, S.values)
-            tol = max(atol, rtol*scale)
-        end
         rankA = count(λ -> abs(λ) > tol, S.values)
-        f = rankA < n - 1 ? X -> gantmacher!(X; atol=atol, rtol=rtol) : trsr!
-        return S.Z*f(S.T)*S.Z'
+        use_gantmacher = rankA < n - 1
+        if negative || use_gantmacher
+            S = Schur{Complex}(S)
+        end
+        if use_gantmacher
+            return S.Z*gantmacher!(S.T; atol=atol, rtol=rtol)*S.Z'
+        else
+            return S.Z*trsr!(S.T)*S.Z'
+        end
     else # complex A
         S = schur(A)
         scale = isempty(S.values) ? zero(real(float(one(T)))) : maximum(abs, S.values)
         tol = max(atol, rtol*scale)
         rankA = count(λ -> abs(λ) > tol, S.values)
-        f = rankA < n - 1 ? X -> gantmacher!(X; atol=atol, rtol=rtol) : trsr!
-        return S.Z*f(S.T)*S.Z'
+        if rankA < n - 1
+            return S.Z*gantmacher!(S.T; atol=atol, rtol=rtol)*S.Z'
+        else
+            return S.Z*trsr!(S.T)*S.Z'
+        end
     end
+end
+
+################################################################################
+#
+# Square root of a matrix using a hybrid Schur-Gantmacher algorithm
+#
+# VERSION: Floating-point hybrid using Schur reordering for the nonzero spectrum,
+#          numerical recovery of the nilpotent partition from nullities of powers,
+#          and a Gantmacher-style construction on the zero-primary block.
+# NOTE: This branch is tolerance-dependent and intended for singular / near-singular
+#       floating-point inputs. It may fail when the zero-eigenvalue structure is
+#       numerically ambiguous.
+#
+################################################################################
+function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
+                     rtol::Real = min(size(A)...)*eps(real(float(one(T))))) where {T}
+    m, n = size(A)
+    (m == n) || throw(ArgumentError("gantmacher!: Matrix A must be square."))
+
+    RT = typeof(real(float(one(T))))
+    Tc = Complex{RT}
+    Ac = Matrix{Tc}(A)
+
+    function _basis_complement(B, S; need::Union{Nothing,Int}=nothing)
+        Bc = Matrix{Tc}(B)
+        Sc = Matrix{Tc}(S)
+        if size(Bc, 2) == 0
+            return zeros(Tc, size(Bc, 1), 0)
+        end
+        Y = copy(Bc)
+        if size(Sc, 2) > 0
+            Y .-= Sc * (Sc' * Y)
+        end
+        F = qr(Y)
+        Q = Matrix(F.Q)
+        R = Matrix(F.R)
+        r = 0
+        t = max(atol, rtol * (isempty(R) ? zero(RT) : maximum(abs, diag(R))))
+        for j = 1:min(size(R,1), size(R,2))
+            if abs(R[j,j]) > t
+                r += 1
+            end
+        end
+        if need !== nothing
+            r < need && throw(ArgumentError("gantmacher!: numerically ambiguous nilpotent chain structure."))
+            r = need
+        end
+        return Q[:, 1:r]
+    end
+
+    function _nullity_basis(M)
+        N = nullspace(M; atol=atol, rtol=rtol)
+        return Matrix{Tc}(N), size(N, 2)
+    end
+
+    function _blockdiag(blocks)
+        N = sum(size(B, 1) for B in blocks)
+        X = zeros(Tc, N, N)
+        p = 1
+        for B in blocks
+            q = p + size(B, 1) - 1
+            X[p:q, p:q] .= Matrix{Tc}(B)
+            p = q + 1
+        end
+        return X
+    end
+
+    function _jordanblock(λ, k::Int)
+        J = zeros(Tc, k, k)
+        for i = 1:k
+            J[i, i] = λ
+        end
+        for i = 1:k-1
+            J[i, i+1] = one(Tc)
+        end
+        return J
+    end
+
+    S = schur(Ac)
+    scale = isempty(S.values) ? zero(RT) : maximum(abs, S.values)
+    tol0 = max(atol, rtol*scale)
+    select = map(λ -> abs(λ) > tol0, S.values)
+    S = ordschur(S, select)
+
+    r = count(select)
+    Tord = Matrix(S.T)
+    Qord = Matrix(S.Z)
+
+    if r == n
+        return Qord * trsr!(copy(Tord)) * Qord'
+    elseif r == 0
+        T1 = zeros(Tc, 0, 0)
+        B = zeros(Tc, 0, n)
+        T0 = Tord
+    else
+        T1 = Tord[1:r, 1:r]
+        B = Tord[1:r, r+1:n]
+        T0 = Tord[r+1:n, r+1:n]
+    end
+
+    U1 = r == 0 ? zeros(Tc, 0, 0) : trsr!(copy(T1))
+
+    m0 = size(T0, 1)
+    if m0 == 0
+        Uord = U1
+        return Qord * Uord * Qord'
+    end
+
+    K = Vector{Matrix{Tc}}(undef, m0 + 1)
+    ν = zeros(Int, m0 + 1)
+    K[1] = zeros(Tc, m0, 0)
+    ν[1] = 0
+
+    P = Matrix{Tc}(I, m0, m0)
+    stabilized = false
+    for k = 1:m0
+        P = P * T0
+        K[k+1], ν[k+1] = _nullity_basis(P)
+        if ν[k+1] == m0
+            for j = k+1:m0
+                K[j+1] = K[k+1]
+                ν[j+1] = m0
+            end
+            stabilized = true
+            break
+        end
+    end
+    stabilized || throw(ArgumentError("gantmacher!: failed to identify a numerically nilpotent zero-primary block."))
+
+    d = zeros(Int, m0)
+    for k = 1:m0
+        d[k] = ν[k+1] - ν[k]
+    end
+
+    b = zeros(Int, m0)
+    for k = 1:m0-1
+        b[k] = d[k] - d[k+1]
+    end
+    b[m0] = d[m0]
+
+    powers = Vector{Matrix{Tc}}(undef, m0 + 1)
+    powers[1] = Matrix{Tc}(I, m0, m0)
+    for k = 1:m0
+        powers[k+1] = powers[k] * T0
+    end
+
+    heads = [zeros(Tc, m0, 0) for _ = 1:m0]
+    for k = m0:-1:1
+        need = b[k]
+        if need == 0
+            continue
+        end
+        G = zeros(Tc, m0, 0)
+        for j = k+1:m0
+            if size(heads[j], 2) > 0
+                G = hcat(G, powers[j-k+1] * heads[j])
+            end
+        end
+        Sspan = hcat(K[k], G)
+        heads[k] = _basis_complement(K[k+1], Sspan; need=need)
+    end
+
+    chains = Vector{Vector{Tc}}()
+    parts = Int[]
+    for k = m0:-1:1
+        H = heads[k]
+        for j = 1:size(H, 2)
+            h = H[:, j]
+            for p = k-1:-1:0
+                push!(chains, powers[p+1] * h)
+            end
+            push!(parts, k)
+        end
+    end
+    V = hcat(chains...)
+    size(V, 2) == m0 || throw(ArgumentError("gantmacher!: failed to construct a full nilpotent chain basis."))
+
+    if rank(V; atol=atol, rtol=rtol) < m0
+        throw(ArgumentError("gantmacher!: numerically singular chain basis for the zero-primary block."))
+    end
+
+    sort!(parts, rev=true)
+    pieces = Matrix{Tc}[]
+    i = 1
+    while i <= length(parts)
+        if i == length(parts)
+            parts[i] == 1 || throw(ArgumentError("gantmacher!: inferred nilpotent block partition does not admit a square root."))
+            push!(pieces, zeros(Tc, 1, 1))
+            i += 1
+        else
+            s, t = parts[i], parts[i+1]
+            (s - t <= 1) || throw(ArgumentError("gantmacher!: inferred nilpotent block partition does not admit a square root."))
+            rpair = s + t
+            Jnil = _jordanblock(zero(Tc), rpair)
+            perm = vcat(collect(1:2:rpair), collect(2:2:rpair))
+            Pperm = zeros(Tc, rpair, rpair)
+            for j = 1:rpair
+                Pperm[perm[j], j] = one(Tc)
+            end
+            push!(pieces, Pperm' * Jnil * Pperm)
+            i += 2
+        end
+    end
+
+    YJ = _blockdiag(pieces)
+    U0 = V * YJ / V
+
+    if r == 0
+        Uord = U0
+    else
+        Ksys = kron(Matrix{Tc}(I, m0, m0), U1) + kron(transpose(U0), Matrix{Tc}(I, r, r))
+        y = Ksys \ vec(B)
+        Y = reshape(y, r, m0)
+        Uord = [U1 Y; zeros(Tc, m0, r) U0]
+    end
+
+    X = Qord * Uord * Qord'
+
+    A_scale = max(opnorm(Ac, 2), one(RT))
+    res = opnorm(X * X - Ac, 2) / A_scale
+    res <= max(sqrt(eps(RT)), 10 * max(atol, rtol)) ||
+        throw(ArgumentError("gantmacher!: hybrid Schur-Gantmacher construction failed residual check."))
+
+    return X
 end
 
 ################################################################################
@@ -94,7 +322,7 @@ end
             r = sqrt(hypot(A[i,i], μ))
             θ = atan(μ, real(A[i,i]))
             s, c = sincos(θ/2)
-            α, β′ = r*c, r*s/µ
+            α, β′ = r*c, r*s/μ
             A[i,i] = α
             A[i+1,i+1] = α
             A[i,i+1] = β′*A[i,i+1]
@@ -118,7 +346,9 @@ end
     M_L₁ = zeros(T,4,4)
     for k = 1:n-1
         for i = 1:n-k
-            if sizes[i] == 0 || sizes[i+k] == 0 continue end
+            if sizes[i] == 0 || sizes[i+k] == 0
+                continue
+            end
             i₁, i₂, j₁, j₂, s₁, s₂ = i, i+sizes[i]-1, i+k, i+k+sizes[i+k]-1, sizes[i], sizes[i+k]
             k₁, k₂ = i+s₁, i+k-1
             L₀ = M_L₀[1:s₁*s₂,1:s₁*s₂]
@@ -137,169 +367,4 @@ end
         end
     end
     return A
-end
-
-################################################################################
-#
-# Square root of a matrix using Gantmacher's algorithm
-# Reference [2]: Gantmacher, F. R. The Theory of Matrices. Vol. 2, Chapter VIII, Sec. 7.
-# NOTE: Jordan form version (numerically unstable) for singular/rank-deficient inputs
-#       and will need to be improved.
-# NOTE: This first version of the code was generated by ChatGPT 5.2 Thinking
-#
-################################################################################
-function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
-                     rtol::Real = min(size(A)...)*eps(real(float(one(T))))) where {T}
-    m, n = size(A)
-    (m == n) || throw(ArgumentError("gantmacher!: Matrix A must be square."))
-
-    S, J = jordan_form(A)
-    J = Matrix(J)
-    S = Matrix(S)
-
-    RT = real(float(one(T)))
-    CT = Complex{RT}
-
-    function blockdiag(blocks::Vector{<:AbstractMatrix})
-        N = sum(size(B, 1) for B in blocks)
-        X = zeros(CT, N, N)
-        p = 1
-        for B in blocks
-            q = p + size(B, 1) - 1
-            X[p:q, p:q] .= CT.(B)
-            p = q + 1
-        end
-        return X
-    end
-
-    function jordanblock(λ, k::Int)
-        B = zeros(CT, k, k)
-        for i = 1:k
-            B[i, i] = λ
-        end
-        for i = 1:k-1
-            B[i, i+1] = one(CT)
-        end
-        return B
-    end
-
-    function parseblocks(JM::AbstractMatrix)
-        vals = diag(JM)
-        scale = isempty(vals) ? zero(RT) : maximum(abs, vals)
-        tol = max(atol, rtol*scale)
-
-        blocks = Tuple{Int,Int,eltype(JM)}[]
-        i = 1
-        while i <= size(JM, 1)
-            λ = JM[i, i]
-            j = i
-            while j < size(JM, 1) &&
-                  abs(JM[j+1, j+1] - λ) <= tol &&
-                  abs(JM[j, j+1] - one(eltype(JM))) <= tol
-                j += 1
-            end
-            push!(blocks, (i, j - i + 1, λ))
-            i = j + 1
-        end
-        return blocks, tol
-    end
-
-    function nonzero_block_sqrt(JB::AbstractMatrix)
-        k = size(JB, 1)
-        λ = CT(JB[1, 1])
-        μ = sqrt(λ)
-        N = CT.(JB) - λ*Matrix{CT}(I, k, k)
-        X = zeros(CT, k, k)
-        term = Matrix{CT}(I, k, k)
-        coeff = one(CT)
-        X .+= μ*term
-        for j = 1:k-1
-            term = term*(N/λ)
-            coeff *= (CT(1)/CT(2) - CT(j - 1))/CT(j)
-            X .+= μ*coeff*term
-        end
-        return X
-    end
-
-    function zeropairs(sizes::Vector{Int})
-        s = sort(copy(sizes), rev=true)
-        pairs = Tuple{Int,Int}[]
-        i = 1
-        while i <= length(s)
-            if i == length(s)
-                s[i] == 1 || throw(ArgumentError("gantmacher!: zero Jordan blocks do not admit a square root."))
-                push!(pairs, (1, 0))
-                i += 1
-            else
-                a, b = s[i], s[i+1]
-                (a - b <= 1) || throw(ArgumentError("gantmacher!: zero Jordan blocks do not admit a square root."))
-                push!(pairs, (a, b))
-                i += 2
-            end
-        end
-        return pairs
-    end
-
-    function zero_pair_root(s::Int, t::Int)
-        if t == 0
-            return zeros(CT, 1, 1)
-        end
-        r = s + t
-        Jnil = jordanblock(zero(CT), r)
-        perm = vcat(collect(1:2:r), collect(2:2:r))
-        P = zeros(CT, r, r)
-        for j = 1:r
-            P[perm[j], j] = one(CT)
-        end
-        return P' * Jnil * P
-    end
-
-    blocks, tol = parseblocks(J)
-
-    zero_ids = Int[]
-    nonzero_ids = Int[]
-    for (k, (_, sz, λ)) in enumerate(blocks)
-        if abs(λ) <= tol
-            push!(zero_ids, k)
-        else
-            push!(nonzero_ids, k)
-        end
-    end
-
-    zero_ids = sort(zero_ids; by = i -> blocks[i][2], rev=true)
-    order = vcat(nonzero_ids, zero_ids)
-
-    perm = Int[]
-    for idx in order
-        i, sz, _ = blocks[idx]
-        append!(perm, i:i+sz-1)
-    end
-    P = zeros(CT, n, n)
-    for j = 1:n
-        P[perm[j], j] = one(CT)
-    end
-
-    Jp = P' * CT.(J) * P
-    pblocks, _ = parseblocks(Jp)
-
-    pieces = Matrix{CT}[]
-
-    nz = length(nonzero_ids)
-    for k = 1:nz
-        i, sz, _ = pblocks[k]
-        JB = Jp[i:i+sz-1, i:i+sz-1]
-        push!(pieces, nonzero_block_sqrt(JB))
-    end
-
-    zero_sizes = [blocks[i][2] for i in zero_ids]
-    pairs = zeropairs(zero_sizes)
-
-    for (s, t) in pairs
-        push!(pieces, zero_pair_root(s, t))
-    end
-
-    Xp = blockdiag(pieces)
-    XJ = P * Xp * P'
-
-    return CT.(S) * XJ / CT.(S)
 end
