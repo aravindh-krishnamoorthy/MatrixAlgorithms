@@ -62,7 +62,7 @@ function sqrtm(A::AbstractMatrix{T}; atol::Real = 0,
         else
             return S.Z * trsr!(S.T) * S.Z'
         end
-    else # complex A
+    else
         S = schur(A)
         scale_vals = isempty(S.values) ? zero(real(float(one(T)))) : maximum(abs, S.values)
         scale_mat  = opnorm(A, 1)
@@ -81,13 +81,6 @@ end
 #
 # Square root of a matrix using a hybrid Schur-Gantmacher algorithm
 #
-# VERSION: Floating-point hybrid using Schur reordering for the nonzero spectrum,
-#          numerical recovery of the nilpotent partition from nullities of powers,
-#          and a Gantmacher-style construction on the zero-primary block.
-# NOTE: This branch is tolerance-dependent and intended for singular / near-singular
-#       floating-point inputs. It may fail when the zero-eigenvalue structure is
-#       numerically ambiguous.
-#
 ################################################################################
 function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
                      rtol::Real = min(size(A)...)*eps(real(float(one(T))))) where {T}
@@ -101,9 +94,7 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     function _basis_complement(B, S; need::Union{Nothing,Int}=nothing)
         Bc = Matrix{Tc}(B)
         Sc = Matrix{Tc}(S)
-
-        nb = size(Bc, 2)
-        nb == 0 && return zeros(Tc, size(Bc, 1), 0)
+        size(Bc, 2) == 0 && return zeros(Tc, size(Bc, 1), 0)
 
         if size(Sc, 2) > 0
             U, σ, _ = svd(Sc; full=false)
@@ -121,14 +112,14 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
 
         U, σ, _ = svd(Y; full=false)
         tolY = max(atol, rtol * (isempty(σ) ? zero(RT) : maximum(abs, σ)))
-        r = count(x -> abs(x) > tolY, σ)
+        rloc = count(x -> abs(x) > tolY, σ)
 
         if need !== nothing
-            r < need && throw(ArgumentError("gantmacher!: numerically ambiguous nilpotent chain structure."))
-            r = need
+            rloc < need && throw(ArgumentError("gantmacher!: numerically ambiguous nilpotent chain structure."))
+            rloc = need
         end
 
-        return r == 0 ? zeros(Tc, size(Bc, 1), 0) : U[:, 1:r]
+        return rloc == 0 ? zeros(Tc, size(Bc, 1), 0) : U[:, 1:rloc]
     end
 
     function _nullity_basis(M)
@@ -137,10 +128,7 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     end
 
     function _blockdiag(blocks)
-        Ntot = 0
-        for B in blocks
-            Ntot += size(B, 1)
-        end
+        Ntot = sum(size(B, 1) for B in blocks)
         X = zeros(Tc, Ntot, Ntot)
         p = 1
         for B in blocks
@@ -258,13 +246,7 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
             end
         end
 
-        if size(K[k], 2) == 0
-            Sspan = G
-        elseif size(G, 2) == 0
-            Sspan = K[k]
-        else
-            Sspan = hcat(K[k], G)
-        end
+        Sspan = size(K[k], 2) == 0 ? G : (size(G, 2) == 0 ? K[k] : hcat(K[k], G))
         heads[k] = _basis_complement(K[k+1], Sspan; need=need)
     end
 
@@ -285,10 +267,7 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
 
     V = hcat(chains...)
     size(V, 2) == m0 || throw(ArgumentError("gantmacher!: failed to construct a full nilpotent chain basis."))
-
-    if rank(V; atol=atol, rtol=rtol) < m0
-        throw(ArgumentError("gantmacher!: numerically singular chain basis for the zero-primary block."))
-    end
+    rank(V; atol=atol, rtol=rtol) < m0 && throw(ArgumentError("gantmacher!: numerically singular chain basis for the zero-primary block."))
 
     sort!(parts, rev=true)
 
@@ -321,14 +300,14 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
     U0 = V * YJ / V
 
     if r == 0
-        Uord = U0
-    else
-        Y = _solve_coupling(U1, U0, B)
-        Uord = zeros(Tc, n, n)
-        Uord[1:r, 1:r] = U1
-        Uord[1:r, r+1:n] = Y
-        Uord[r+1:n, r+1:n] = U0
+        return Qord * U0 * Qord'
     end
+
+    Y = _solve_coupling(U1, U0, B)
+    Uord = zeros(Tc, n, n)
+    Uord[1:r, 1:r] = U1
+    Uord[1:r, r+1:n] = Y
+    Uord[r+1:n, r+1:n] = U0
 
     X = Qord * Uord * Qord'
 
@@ -338,71 +317,4 @@ function gantmacher!(A::AbstractMatrix{T}; atol::Real = 0,
         throw(ArgumentError("gantmacher!: hybrid Schur-Gantmacher construction failed residual check."))
 
     return X
-end
-
-################################################################################
-#
-# Square root of a quasi upper triangular matrix (output of Schur decomposition)
-# Reference [1]: Smith, M. I. (2003). A Schur Algorithm for Computing Matrix pth Roots.
-#   SIAM Journal on Matrix Analysis and Applications (Vol. 24, Issue 4, pp. 971–989).
-#   https://doi.org/10.1137/s0895479801392697
-#
-# VERSION: Pure Julia version for both real- and complex-valued inputs
-# NOTE: It is assumed that the diagonal elements of A have a square root in type T
-#
-################################################################################
-@views @inbounds function trsr!(A::AbstractMatrix{T}) where {T}
-    m, n = size(A)
-    (m == n) || throw(ArgumentError("trsr!: Matrix A must be square."))
-    dot = T <: Complex ? BLAS.dotu : BLAS.dot
-    i = 1
-    sizes = ones(Int, n)
-    while i < n
-        if !iszero(A[i+1, i])
-            μ = sqrt(-real(A[i, i+1] * A[i+1, i]))
-            r = sqrt(hypot(A[i, i], μ))
-            θ = atan(μ, real(A[i, i]))
-            s, c = sincos(θ / 2)
-            α, β′ = r * c, r * s / μ
-            A[i, i] = α
-            A[i+1, i+1] = α
-            A[i, i+1] = β′ * A[i, i+1]
-            A[i+1, i] = β′ * A[i+1, i]
-            sizes[i] = 2
-            sizes[i+1] = 0
-            i += 2
-        else
-            A[i, i] = sqrt(A[i, i])
-            sizes[i] = 1
-            i += 1
-        end
-    end
-    if i == n
-        A[n, n] = sqrt(A[n, n])
-        sizes[i] = 1
-    end
-    Δ = I(4)
-    M_L₀ = zeros(T, 4, 4)
-    M_L₁ = zeros(T, 4, 4)
-    for k = 1:n-1
-        for i = 1:n-k
-            if sizes[i] == 0 || sizes[i+k] == 0
-                continue
-            end
-            i₁, i₂, j₁, j₂, s₁, s₂ = i, i + sizes[i] - 1, i + k, i + k + sizes[i+k] - 1, sizes[i], sizes[i+k]
-            k₁, k₂ = i + s₁, i + k - 1
-            L₀ = M_L₀[1:s₁*s₂, 1:s₁*s₂]
-            L₁ = M_L₁[1:s₁*s₂, 1:s₁*s₂]
-            if s₁ == 1 && s₂ == 1
-                Bᵢⱼ⁽⁰⁾ = dot(A[i₁, k₁:k₂], A[k₁:k₂, j₁])
-                A[i₁, j₁] = (A[i₁, j₁] - Bᵢⱼ⁽⁰⁾) / (A[i₁, i₁] + A[j₁, j₁])
-            else
-                mul!(A[i₁:i₂, j₁:j₂], A[i₁:i₂, k₁:k₂], A[k₁:k₂, j₁:j₂], T(-1.0), T(+1.0))
-                kron!(L₀, Δ[1:s₂, 1:s₂], A[i₁:i₂, i₁:i₂])
-                L₀ .+= kron!(L₁, transpose(A[j₁:j₂, j₁:j₂]), Δ[1:s₁, 1:s₁])
-                ldiv!(lu!(L₀), A[i₁:i₂, j₁:j₂][:])
-            end
-        end
-    end
-    return A
 end
