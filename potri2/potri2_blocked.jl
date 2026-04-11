@@ -88,15 +88,15 @@ function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:
         j0  = j - nb
 
         if j < n
-            BLAS.gemm!('N', 'N', one(T), view(X, 1:j, j+1:n), view(X, j+1:n, jr), zero(T), view(Bblk, 1:j, :))
+            mul!(view(Bblk, 1:j, :), view(X, 1:j, j+1:n), view(X, j+1:n, jr), one(T), zero(T))
         else
             fill!(Bblk, zero(T))
         end
         _potri2_inner!(view(X, jr, jr), view(Bblk, jr, :), view(bvec, 1:nb), view(rhs, 1:nb))
         if j0 > 0
             B = view(Bblk, 1:j0, 1:nb)
-            BLAS.gemm!('N', 'N', one(T), view(X, 1:j0, jr), view(X, jr, jr), one(T), B)
-            BLAS.trsm!('L', 'U', 'N', 'N', -one(T), view(X, 1:j0, 1:j0), B)
+            mul!(B, view(X, 1:j0, jr), view(X, jr, jr), one(T), one(T))
+            ldiv!(UpperTriangular(view(X, 1:j0, 1:j0)), rmul!(B, -one(T)))
             @views X[jr1:jr1+nb-1, 1:j0] .= B[1:j0, 1:nb]'
         end
     end
