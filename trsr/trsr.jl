@@ -15,14 +15,12 @@ using LinearAlgebra
 # Reference [1]: Smith, M. I. (2003). A Schur Algorithm for Computing Matrix pth Roots.
 #   SIAM Journal on Matrix Analysis and Applications (Vol. 24, Issue 4, pp. 971–989).
 #   https://doi.org/10.1137/s0895479801392697
-# Reference [2]: Gantmacher, F. R. The Theory of Matrices. Vol. 2, Chapter VIII, Sec. 7.
 #
 # NOTE: The matrix is lifted to the complex field if the diagonal values of the
 #         triangular Schur matrix does not have a square root in type T
 #
 ################################################################################
-function sqrtm(A::AbstractMatrix{T}; atol::Real = 0,
-               rtol::Real = min(size(A)...)*eps(real(float(one(T))))) where {T}
+function sqrtm(A::AbstractMatrix{T}, f::Function = trsr!) where {T}
     m, n = size(A)
     (m == n) || throw(ArgumentError("sqrt: Matrix A must be square."))
     symmetric = ishermitian(A)
@@ -42,39 +40,20 @@ function sqrtm(A::AbstractMatrix{T}; atol::Real = 0,
         end
     elseif isreal(A)
         S = schur(real(A))
-        scale_vals = isempty(S.values) ? zero(real(float(one(T)))) : maximum(abs, S.values)
-        scale_mat  = opnorm(real(A), 1)
-        scale = max(scale_vals, scale_mat)
-        tol = max(atol, rtol*scale)
         negative = false
         for i = 1:n
-            if isreal(S.values[i]) && real(S.values[i]) < -tol
+            if isreal(S.values[i]) && real(S.values[i]) < 0
                 negative = true
                 break
             end
         end
-        rankA = count(λ -> abs(λ) > tol, S.values)
-        use_gantmacher = rankA < n - 1
-        if negative || use_gantmacher
+        if negative
             S = Schur{Complex}(S)
         end
-        if use_gantmacher
-            return S.Z * gantmacher!(S.T; atol=atol, rtol=rtol) * S.Z'
-        else
-            return S.Z * trsr!(S.T) * S.Z'
-        end
-    else
+        return S.Z*f(S.T)*S.Z'
+    else # complex A
         S = schur(A)
-        scale_vals = isempty(S.values) ? zero(real(float(one(T)))) : maximum(abs, S.values)
-        scale_mat  = opnorm(A, 1)
-        scale = max(scale_vals, scale_mat)
-        tol = max(atol, rtol*scale)
-        rankA = count(λ -> abs(λ) > tol, S.values)
-        if rankA < n - 1
-            return S.Z * gantmacher!(S.T; atol=atol, rtol=rtol) * S.Z'
-        else
-            return S.Z * trsr!(S.T) * S.Z'
-        end
+        return S.Z*f(S.T)*S.Z'
     end
 end
 
