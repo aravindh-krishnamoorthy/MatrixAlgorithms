@@ -8,8 +8,6 @@
 using LinearAlgebra
 using Libdl
 
-include("potri2_blocked.jl")
-
 ################################################################################
 # Invert a positive definite matrix using the algorithm in
 # "Matrix Inversion Using Cholesky Decomposition", by Aravindh Krishnamoorthy
@@ -17,7 +15,7 @@ include("potri2_blocked.jl")
 ################################################################################
 # Reference version
 ################################################################################
-function potri2!(uplo::Char, X::AbstractMatrix{T}) where {T}
+function potri2!(uplo::Char, X::AbstractMatrix{T}) where {T<:Number}
     n = size(X,1)
     d = zeros(T, n)
     z = zero(T)

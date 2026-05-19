@@ -12,10 +12,8 @@
 ################################################################################
 # Blocked version
 ################################################################################
-const BLAS = LinearAlgebra.BLAS
-
 @inline function _potri2_inner!(R::StridedMatrix{T}, Tinit::StridedMatrix{T},
-                                         b::StridedVector{T}, rhs::StridedVector{T}) where {T<:LinearAlgebra.BlasFloat}
+                                         b::StridedVector{T}, rhs::StridedVector{T}) where {T<:Number}
     n = size(R, 1)
     @inbounds for i = 1:n
         b[i] = Tinit[i, n]
@@ -29,18 +27,15 @@ const BLAS = LinearAlgebra.BLAS
         end
         @inbounds x[j] += one(T)
 
-        A = view(R, 1:j, 1:j)
-        BLAS.trsv!('U', 'N', 'N', A, x)
+        ldiv!(UpperTriangular(view(R, 1:j, 1:j)), x)
 
         @inbounds for i = 1:j
             R[j, i] = conj(x[i])
         end
 
         if j > 1
-            A2 = view(R, 1:j-1, j:n)
-            v  = view(R, j:n, j-1)
             y  = view(b, 1:j-1)
-            BLAS.gemv!('N', one(T), A2, v, zero(T), y)
+            mul!(y, view(R, 1:j-1, j:n), view(R, j:n, j-1))
             @inbounds for i = 1:j-1
                 y[i] += Tinit[i, j-1]
             end
@@ -56,7 +51,7 @@ const BLAS = LinearAlgebra.BLAS
     return R
 end
 
-function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:LinearAlgebra.BlasFloat}
+function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:Number}
     n = size(X, 1)
     @assert size(X, 2) == n
     @assert bs > 0
@@ -77,6 +72,13 @@ function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:
         end
     end
 
+    if n <= bs
+        Tinit = zeros(T, n, n)
+        bvec  = Vector{T}(undef, n)
+        rhs   = Vector{T}(undef, n)
+        return _potri2_inner!(X, Tinit, bvec, rhs)
+    end
+
     Bblk    = Matrix{T}(undef, n, bs)
     bvec    = Vector{T}(undef, bs)
     rhs     = Vector{T}(undef, bs)
@@ -88,7 +90,7 @@ function potri2_blocked!(uplo::Char, X::StridedMatrix{T}; bs::Int=64) where {T<:
         j0  = j - nb
 
         if j < n
-            mul!(view(Bblk, 1:j, :), view(X, 1:j, j+1:n), view(X, j+1:n, jr), one(T), zero(T))
+            mul!(view(Bblk, 1:j, 1:nb), view(X, 1:j, j+1:n), view(X, j+1:n, jr), one(T), zero(T))
         else
             fill!(Bblk, zero(T))
         end

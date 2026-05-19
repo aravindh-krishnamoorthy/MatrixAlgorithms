@@ -10,7 +10,8 @@ using Printf
 # using Plots
 # unicodeplots()
 
-include("../src/MatrixAlgorithms.jl")
+include("potri2_blocked.jl")
+include("potri2.jl")
 # BLAS.set_num_threads(1)
 
 if length(ARGS) > 0
@@ -40,14 +41,14 @@ for i in 1:length(MS)
     L = Matrix(cholesky(X).L)
     X0 = LAPACK.potri!('U', copy(U))
     if N <= 256
-        X1 = MatrixAlgorithms.potri2!('U', copy(U))
+        X1 = potri2!('U', copy(U))
         display(norm(triu(X1) - X0))
-        X1 = MatrixAlgorithms.potri2!('L', copy(L))
+        X1 = potri2!('L', copy(L))
         display(norm(triu(X1) - X0))
     end
-    X1 = MatrixAlgorithms.potri2_blocked!('U', copy(U))
+    X1 = potri2_blocked!('U', copy(U))
     display(norm(triu(X1) - X0))
-    X1 = MatrixAlgorithms.potri2_blocked!('L', copy(L))
+    X1 = potri2_blocked!('L', copy(L))
     display(norm(triu(X1) - X0))
     # Timing
     b = @benchmark LAPACK.potri!('U', copy($U)) ;
@@ -55,14 +56,14 @@ for i in 1:length(MS)
     b = @benchmark LAPACK.potri!('L', copy($L)) ;
     MKLL[i] = mean(b).time
     if N <= 256
-        b = @benchmark MatrixAlgorithms.potri2!('U', copy($U)) ;
+        b = @benchmark potri2!('U', copy($U)) ;
         RU[i] = mean(b).time
-        b = @benchmark MatrixAlgorithms.potri2!('L', copy($L)) ;
+        b = @benchmark potri2!('L', copy($L)) ;
         RL[i] = mean(b).time
     end
-    b = @benchmark MatrixAlgorithms.potri2_blocked!('U', copy($U)) ;
+    b = @benchmark potri2_blocked!('U', copy($U)) ;
     FU[i] = mean(b).time
-    b = @benchmark MatrixAlgorithms.potri2_blocked!('L', copy($L)) ;
+    b = @benchmark potri2_blocked!('L', copy($L)) ;
     FL[i] = mean(b).time
 end
 
@@ -90,14 +91,14 @@ for i in 1:length(MS)
     L = Matrix(cholesky(X).L)
     X0 = LAPACK.potri!('U', copy(U))
     if N <= 256
-        X1 = MatrixAlgorithms.potri2!('U', copy(U))
+        X1 = potri2!('U', copy(U))
         display(norm(triu(X1) - X0))
-        X1 = MatrixAlgorithms.potri2!('L', copy(L))
+        X1 = potri2!('L', copy(L))
         display(norm(triu(X1) - X0))
     end
-    X1 = MatrixAlgorithms.potri2_blocked!('U', copy(U))
+    X1 = potri2_blocked!('U', copy(U))
     display(norm(triu(X1) - X0))
-    X1 = MatrixAlgorithms.potri2_blocked!('L', copy(L))
+    X1 = potri2_blocked!('L', copy(L))
     display(norm(triu(X1) - X0))
     # Timing
     b = @benchmark LAPACK.potri!('U', copy($U)) ;
@@ -105,14 +106,14 @@ for i in 1:length(MS)
     b = @benchmark LAPACK.potri!('L', copy($L)) ;
     MKLL[i] = mean(b).time
     if N <= 256
-        b = @benchmark MatrixAlgorithms.potri2!('U', copy($U)) ;
+        b = @benchmark potri2!('U', copy($U)) ;
         RU[i] = mean(b).time
-        b = @benchmark MatrixAlgorithms.potri2!('L', copy($L)) ;
+        b = @benchmark potri2!('L', copy($L)) ;
         RL[i] = mean(b).time
     end
-    b = @benchmark MatrixAlgorithms.potri2_blocked!('U', copy($U)) ;
+    b = @benchmark potri2_blocked!('U', copy($U)) ;
     FU[i] = mean(b).time
-    b = @benchmark MatrixAlgorithms.potri2_blocked!('L', copy($L)) ;
+    b = @benchmark potri2_blocked!('L', copy($L)) ;
     FL[i] = mean(b).time
 end
 
